@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+
 import {
   Heart,
   Droplet,
@@ -13,297 +14,498 @@ import {
   ChevronDown,
   ChevronRight,
   LayoutDashboard,
-  LogOut,
-  X,
-  Building,
   Hospital,
+  Activity,
 } from "lucide-react";
 
-interface SidebarProps {
-  isOpen: boolean;
-  setIsOpen: (isOpen: boolean) => void;
-}
+import {
+  Sidebar as SidebarPrimitive,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
+  useSidebar,
+} from "@/components/ui/sidebar";
 
-export function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+
+export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const [expandedItems, setExpandedItems] = useState<string[]>(['reports']);
+  const { state } = useSidebar();
+
+  const [expandedItems, setExpandedItems] = useState<string[]>([
+    "reports",
+  ]);
+
   const [userName, setUserName] = useState("John Doe");
 
-  useEffect(() => {
-    const user = localStorage.getItem('user');
-    if (user) {
-      try {
-        const userData = JSON.parse(user);
-        if (userData.fullName) setUserName(userData.fullName);
-      } catch (e) {
-        console.error('Error parsing user data:', e);
-      }
-    }
-  }, []);
+  const isCollapsed = state === "collapsed";
 
-  const toggleExpand = (item: string) => {
-    setExpandedItems(prev =>
-      prev.includes(item)
-        ? prev.filter(i => i !== item)
-        : [...prev, item]
-    );
-  };
+  /* =======================================================
+     LOAD USER
+  ======================================================= */
+
+  useEffect(() => {
+    const user = localStorage.getItem("user")
+
+    if (!user) return
+
+    try {
+      const userData = JSON.parse(user)
+
+      if (userData.fullName) {
+        setUserName(userData.fullName)
+      }
+    } catch (error) {
+      console.error(
+        "Error parsing user data:",
+        error
+      )
+    }
+  }, [])
+
+  /* =======================================================
+     ACTIVE ROUTES
+  ======================================================= */
 
   const isActive = (path: string) => {
-    return pathname === path;
-  };
+    return pathname === path
+  }
 
-  const isActiveParent = (paths: string[]) => {
-    return paths.some(path => pathname?.startsWith(path));
-  };
+  const isActiveParent = (
+    paths: string[]
+  ) => {
+    return paths.some((path) =>
+      pathname?.startsWith(path)
+    )
+  }
 
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    router.push('/auth/login');
-  };
+  /* =======================================================
+     INITIALS
+  ======================================================= */
+
+  const getUserInitials = () => {
+    const initials = userName
+      .split(" ")
+      .filter(Boolean)
+      .map((word) =>
+        word.charAt(0)
+      )
+      .join("")
+      .toUpperCase()
+      .slice(0, 2)
+
+    return initials || "AD"
+  }
+
+  /* =======================================================
+     NAVIGATION
+  ======================================================= */
 
   const navItems = [
     {
       label: "Dashboard",
       icon: LayoutDashboard,
       href: "/admin/dashboard",
-      active: isActive("/admin/dashboard"),
+      active:
+        isActive("/admin/dashboard"),
     },
+
     {
       label: "Donors",
       icon: Users,
       href: "/admin/donors",
-      active: isActive("/admin/donors"),
+      active:
+        isActive("/admin/donors"),
     },
+
     {
       label: "Hospitals",
       icon: Hospital,
       href: "/admin/hospitals",
-      active: isActive("/admin/hospitals"),
+      active:
+        isActive("/admin/hospitals"),
     },
+
     {
       label: "Blood Inventory",
       icon: Droplet,
       href: "/admin/inventory",
-      active: isActive("/admin/inventory"),
+      active:
+        isActive("/admin/inventory"),
     },
+
     {
       label: "Reports",
       icon: FileText,
       href: "/admin/reports",
-      active: isActiveParent(["/admin/reports"]),
-      // ✅ Make the parent clickable by adding the href
+      active:
+        isActiveParent([
+          "/admin/reports",
+        ]),
+
       children: [
         {
           label: "Requests",
           icon: Bell,
-          href: "/admin/reports/requests",
-          active: isActive("/admin/reports/requests"),
+          href:
+            "/admin/reports/requests",
+          active:
+            isActive(
+              "/admin/reports/requests"
+            ),
         },
+
         {
           label: "Donations",
           icon: Droplet,
-          href: "/admin/reports/donations",
-          active: isActive("/admin/reports/donations"),
+          href:
+            "/admin/reports/donations",
+          active:
+            isActive(
+              "/admin/reports/donations"
+            ),
         },
+
         {
           label: "Analytics",
           icon: Settings,
-          href: "/admin/reports/analytics",
-          active: isActive("/admin/reports/analytics"),
+          href:
+            "/admin/reports/analytics",
+          active:
+            isActive(
+              "/admin/reports/analytics"
+            ),
         },
       ],
     },
-  ];
+  ]
 
-  const getUserInitials = () => {
-    return userName
-      .split(' ')
-      .map(word => word.charAt(0))
-      .join('')
-      .toUpperCase()
-      .slice(0, 2);
-  };
+  /* =======================================================
+     RENDER
+  ======================================================= */
 
   return (
-    <>
-      {/* Mobile Overlay */}
-      {isOpen && (
-        <div
-          className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40 lg:hidden"
-          onClick={() => setIsOpen(false)}
-        />
-      )}
+    <SidebarPrimitive
+      side="left"
+      variant="sidebar"
+      collapsible="icon"
+      className="border-r border-zinc-200/70 dark:border-zinc-800/70"
+    >
 
-      {/* Sidebar */}
-      <aside
-        className={`
-          fixed lg:sticky top-0 left-0 z-50 lg:z-30
-          h-screen w-72 lg:w-64 xl:w-72
-          bg-white dark:bg-zinc-900
-          border-r border-zinc-200/60 dark:border-zinc-800/60
-          transition-transform duration-300 ease-in-out
-          flex flex-col
-          ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
-        `}
-      >
-        {/* Logo Section */}
-        <div className="flex items-center justify-between px-6 py-5 border-b border-zinc-200/60 dark:border-zinc-800/60">
-          <Link href="/admin/dashboard" className="flex items-center gap-3">
-            <div className="bg-red-600 p-2 rounded-xl shadow-lg shadow-red-200 dark:shadow-red-900/30">
-              <Heart className="w-5 h-5 text-white" fill="currentColor" />
-            </div>
-            <div>
-              <h1 className="text-lg font-bold text-zinc-900 dark:text-white tracking-tight">
-                RedPulse
-              </h1>
-              <p className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium tracking-wider uppercase">
-                Admin Panel
-              </p>
-            </div>
-          </Link>
-          <button
-            onClick={() => setIsOpen(false)}
-            className="lg:hidden p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition"
+      {/* ===================================================
+          HEADER
+      =================================================== */}
+
+      <SidebarHeader className="border-b border-sidebar-border p-0">
+
+        <div
+          className={[
+            "flex h-16 items-center",
+            isCollapsed
+              ? "justify-center px-2"
+              : "px-4",
+          ].join(" ")}
+        >
+
+          <Link
+            href="/admin/dashboard"
+            className="flex min-w-0 items-center gap-3"
           >
-            <X className="w-5 h-5 text-zinc-500 dark:text-zinc-400" />
-          </button>
+
+            {/* LOGO - EKG/Life Monitor Icon */}
+
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-red-600 shadow-md shadow-red-200/60 dark:shadow-red-900/30">
+              <Activity
+                className="h-[18px] w-[18px] text-white"
+                strokeWidth={2.5}
+              />
+            </div>
+
+            {/* BRAND */}
+
+            {!isCollapsed && (
+              <div className="min-w-0">
+
+                <h1 className="text-lg font-bold tracking-tight text-sidebar-foreground">
+                  RedPulse
+                </h1>
+
+                <p className="text-[10px] font-medium uppercase tracking-[0.15em] text-sidebar-foreground/60">
+                  Admin Panel
+                </p>
+
+              </div>
+            )}
+
+          </Link>
+
         </div>
 
-        {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const hasChildren = item.children && item.children.length > 0;
-            const isExpanded = expandedItems.includes(item.label.toLowerCase());
+      </SidebarHeader>
 
-            if (hasChildren) {
-              return (
-                <div key={item.label} className="space-y-1">
-                  {/* Parent item - now clickable */}
-                  <Link
-                    href={item.href}
-                    onClick={() => {
-                      setIsOpen(false);
-                      // Toggle expansion when clicked
-                      toggleExpand(item.label.toLowerCase());
-                    }}
-                    className={`
-                      w-full flex items-center justify-between px-4 py-2.5 rounded-xl
-                      transition-all duration-200 group
-                      ${item.active || isActiveParent(item.children?.map(c => c.href) || [])
-                        ? 'bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400'
-                        : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800/50'
-                      }
-                    `}
-                  >
-                    <div className="flex items-center gap-3">
-                      <Icon className={`w-5 h-5 transition-colors ${
-                        item.active || isActiveParent(item.children?.map(c => c.href) || [])
-                          ? 'text-red-600 dark:text-red-400'
-                          : 'text-zinc-400 dark:text-zinc-500 group-hover:text-zinc-600 dark:group-hover:text-zinc-300'
-                      }`} />
-                      <span className="text-sm font-medium">{item.label}</span>
-                    </div>
-                    <button
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        toggleExpand(item.label.toLowerCase());
-                      }}
-                      className="p-1 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded"
+      {/* ===================================================
+          NAVIGATION
+      =================================================== */}
+
+      <SidebarContent className="px-2 py-4">
+
+        <SidebarGroup className="p-0">
+
+          <SidebarGroupContent>
+
+            <SidebarMenu className="gap-1">
+
+              {navItems.map((item) => {
+                const Icon = item.icon
+
+                const hasChildren =
+                  !!item.children &&
+                  item.children.length > 0
+
+                const itemKey =
+                  item.label.toLowerCase()
+
+                const isExpanded =
+                  expandedItems.includes(
+                    itemKey
+                  )
+
+                /* =========================================
+                   COLLAPSIBLE
+                ========================================= */
+
+                if (hasChildren) {
+                  return (
+                    <SidebarMenuItem
+                      key={item.label}
                     >
-                      {isExpanded ? (
-                        <ChevronDown className="w-4 h-4" />
-                      ) : (
-                        <ChevronRight className="w-4 h-4" />
-                      )}
-                    </button>
-                  </Link>
 
-                  {isExpanded && (
-                    <div className="ml-9 space-y-1 border-l-2 border-zinc-200/60 dark:border-zinc-800/60 pl-3">
-                      {item.children?.map((child) => {
-                        const ChildIcon = child.icon;
-                        return (
-                          <Link
-                            key={child.href}
-                            href={child.href}
-                            onClick={() => setIsOpen(false)}
-                            className={`
-                              flex items-center gap-3 px-4 py-2 rounded-xl text-sm
-                              transition-all duration-200
-                              ${child.active
-                                ? 'bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400'
-                                : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 hover:text-zinc-900 dark:hover:text-white'
+                      <Collapsible
+                        open={isExpanded}
+                        onOpenChange={(open) => {
+                          setExpandedItems(
+                            (previous) => {
+                              if (open) {
+                                return previous.includes(
+                                  itemKey
+                                )
+                                  ? previous
+                                  : [
+                                      ...previous,
+                                      itemKey,
+                                    ]
                               }
-                            `}
-                          >
-                            <ChildIcon className="w-4 h-4" />
-                            <span>{child.label}</span>
-                          </Link>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              );
-            }
 
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={() => setIsOpen(false)}
-                className={`
-                  flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm
-                  transition-all duration-200 group
-                  ${item.active
-                    ? 'bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400'
-                    : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 hover:text-zinc-900 dark:hover:text-white'
-                  }
-                `}
-              >
-                <Icon className={`w-5 h-5 transition-colors ${
-                  item.active
-                    ? 'text-red-600 dark:text-red-400'
-                    : 'text-zinc-400 dark:text-zinc-500 group-hover:text-zinc-600 dark:group-hover:text-zinc-300'
-                }`} />
-                <span className="font-medium">{item.label}</span>
-              </Link>
-            );
-          })}
+                              return previous.filter(
+                                (value) =>
+                                  value !==
+                                  itemKey
+                              )
+                            }
+                          )
+                        }}
+                        className="w-full"
+                      >
 
-          {/* Divider */}
-          <div className="my-4 border-t border-zinc-200/60 dark:border-zinc-800/60" />
-        </nav>
+                        <CollapsibleTrigger
+                          render={
+                            <SidebarMenuButton
+                              isActive={
+                                item.active ||
+                                isActiveParent(
+                                  item.children?.map(
+                                    (child) =>
+                                      child.href
+                                  ) || []
+                                )
+                              }
+                              tooltip={
+                                isCollapsed
+                                  ? item.label
+                                  : undefined
+                              }
+                              className="h-10 w-full rounded-lg px-3"
+                            />
+                          }
+                        >
 
-        {/* User Profile */}
-        <div className="border-t border-zinc-200/60 dark:border-zinc-800/60 p-4">
-          <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-zinc-50/80 dark:bg-zinc-800/50">
-            <div className="w-9 h-9 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center text-red-600 dark:text-red-400 font-semibold text-sm">
-              {getUserInitials()}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-zinc-900 dark:text-white truncate">
+                          <Icon className="h-5 w-5 shrink-0" />
+
+                          {!isCollapsed && (
+                            <>
+                              <span className="truncate text-sm font-medium">
+                                {item.label}
+                              </span>
+
+                              <span className="ml-auto">
+                                {isExpanded ? (
+                                  <ChevronDown className="h-4 w-4" />
+                                ) : (
+                                  <ChevronRight className="h-4 w-4" />
+                                )}
+                              </span>
+                            </>
+                          )}
+
+                        </CollapsibleTrigger>
+
+                        <CollapsibleContent>
+
+                          <SidebarMenuSub className="ml-3 mt-1 border-l border-sidebar-border pl-2">
+
+                            {item.children?.map(
+                              (child) => {
+                                const ChildIcon =
+                                  child.icon
+
+                                return (
+                                  <SidebarMenuSubItem
+                                    key={
+                                      child.href
+                                    }
+                                  >
+
+                                    <SidebarMenuSubButton
+                                      isActive={
+                                        child.active
+                                      }
+                                      render={
+                                        <Link
+                                          href={
+                                            child.href
+                                          }
+                                        />
+                                      }
+                                      className="h-9 rounded-md"
+                                    >
+
+                                      <ChildIcon className="h-4 w-4" />
+
+                                      <span className="text-sm">
+                                        {
+                                          child.label
+                                        }
+                                      </span>
+
+                                    </SidebarMenuSubButton>
+
+                                  </SidebarMenuSubItem>
+                                )
+                              }
+                            )}
+
+                          </SidebarMenuSub>
+
+                        </CollapsibleContent>
+
+                      </Collapsible>
+
+                    </SidebarMenuItem>
+                  )
+                }
+
+                /* =========================================
+                   NORMAL ITEM
+                ========================================= */
+
+                return (
+                  <SidebarMenuItem
+                    key={item.href}
+                  >
+
+                    <SidebarMenuButton
+                      isActive={
+                        item.active
+                      }
+                      tooltip={
+                        isCollapsed
+                          ? item.label
+                          : undefined
+                      }
+                      render={
+                        <Link
+                          href={item.href}
+                        />
+                      }
+                      className="h-10 rounded-lg px-3"
+                    >
+
+                      <Icon className="h-5 w-5 shrink-0" />
+
+                      {!isCollapsed && (
+                        <span className="truncate text-sm font-medium">
+                          {item.label}
+                        </span>
+                      )}
+
+                    </SidebarMenuButton>
+
+                  </SidebarMenuItem>
+                )
+              })}
+
+            </SidebarMenu>
+
+          </SidebarGroupContent>
+
+        </SidebarGroup>
+
+      </SidebarContent>
+
+      {/* ===================================================
+          USER PROFILE (No Logout Button)
+      =================================================== */}
+
+      <div className="mt-auto border-t border-sidebar-border p-3">
+
+        <div
+          className={[
+            "flex items-center gap-3 rounded-xl",
+            "bg-sidebar-accent/50",
+            isCollapsed
+              ? "justify-center p-2"
+              : "px-3 py-3",
+          ].join(" ")}
+        >
+
+          {/* AVATAR */}
+
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-red-100 text-xs font-semibold text-red-600 dark:bg-red-900/30 dark:text-red-400">
+            {getUserInitials()}
+          </div>
+
+          {/* USER INFORMATION */}
+
+          {!isCollapsed && (
+            <div className="min-w-0 flex-1">
+
+              <p className="truncate text-sm font-medium text-sidebar-foreground">
                 {userName}
               </p>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400 truncate">
+
+              <p className="truncate text-xs text-sidebar-foreground/60">
                 Administrator
               </p>
+
             </div>
-            <button
-              onClick={handleLogout}
-              className="p-1.5 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition text-red-500 hover:text-red-600"
-              title="Logout"
-            >
-              <LogOut className="w-4 h-4" />
-            </button>
-          </div>
+          )}
+
         </div>
-      </aside>
-    </>
-  );
+
+      </div>
+
+    </SidebarPrimitive>
+  )
 }

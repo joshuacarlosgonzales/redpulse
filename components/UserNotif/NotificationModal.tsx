@@ -11,11 +11,13 @@ import {
   Info,
   MailCheck,
   X,
-  Clock
+  Clock,
+  Send,
+  RefreshCw,
 } from "lucide-react";
 
 interface Notification {
-  id: string;
+  _id: string;
   subject: string;
   message: string;
   type: 'info' | 'success' | 'warning' | 'error';
@@ -32,6 +34,7 @@ interface NotificationModalProps {
   unreadCount: number;
   onMarkAsRead: (id: string) => void;
   onMarkAllAsRead: () => void;
+  onRefresh?: () => void;
 }
 
 export default function NotificationModal({
@@ -40,7 +43,8 @@ export default function NotificationModal({
   notifications,
   unreadCount,
   onMarkAsRead,
-  onMarkAllAsRead
+  onMarkAllAsRead,
+  onRefresh,
 }: NotificationModalProps) {
   const [loading, setLoading] = useState(false);
 
@@ -93,6 +97,23 @@ export default function NotificationModal({
     }
   };
 
+  const formatMessage = (message: string) => {
+    return message.split('\n').map((line, i) => (
+      <span key={i}>
+        {line}
+        {i < message.split('\n').length - 1 && <br />}
+      </span>
+    ));
+  };
+
+  const handleRefresh = () => {
+    if (onRefresh) {
+      setLoading(true);
+      onRefresh();
+      setTimeout(() => setLoading(false), 500);
+    }
+  };
+
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div 
@@ -116,6 +137,17 @@ export default function NotificationModal({
             </p>
           </div>
           <div className="flex items-center gap-2">
+            {onRefresh && (
+              <button
+                onClick={handleRefresh}
+                disabled={loading}
+                className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300 bg-green-50 dark:bg-green-950/30 rounded-lg transition disabled:opacity-50"
+                title="Refresh notifications"
+              >
+                <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                Refresh
+              </button>
+            )}
             {unreadCount > 0 && (
               <button
                 onClick={onMarkAllAsRead}
@@ -148,8 +180,8 @@ export default function NotificationModal({
             <div className="space-y-3">
               {notifications.map((notif) => (
                 <div
-                  key={notif.id} // ✅ FIXED: Added unique key here
-                  onClick={() => onMarkAsRead(notif.id)}
+                  key={notif._id}
+                  onClick={() => onMarkAsRead(notif._id)}
                   className={`p-4 rounded-lg border transition cursor-pointer hover:shadow-md ${
                     !notif.isRead 
                       ? 'border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-950/20' 
@@ -170,7 +202,7 @@ export default function NotificationModal({
                         )}
                       </div>
                       <p className="text-sm text-zinc-600 dark:text-zinc-400 mt-1 whitespace-pre-line">
-                        {notif.message}
+                        {formatMessage(notif.message)}
                       </p>
                       <div className="flex items-center gap-4 mt-2">
                         <p className="text-xs text-zinc-400 dark:text-zinc-500 flex items-center gap-1">
@@ -182,7 +214,8 @@ export default function NotificationModal({
                           })} at {new Date(notif.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </p>
                         {notif.sender && (
-                          <p className="text-xs text-zinc-400 dark:text-zinc-500">
+                          <p className="text-xs text-zinc-400 dark:text-zinc-500 flex items-center gap-1">
+                            <Send className="h-3 w-3" />
                             From: {notif.sender}
                           </p>
                         )}
@@ -192,7 +225,7 @@ export default function NotificationModal({
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          onMarkAsRead(notif.id);
+                          onMarkAsRead(notif._id);
                         }}
                         className="flex-shrink-0 text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 transition"
                       >

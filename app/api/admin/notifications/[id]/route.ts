@@ -1,10 +1,10 @@
-// app/api/admin/notifications/[id]/read/route.ts
+// app/api/admin/notifications/[id]/route.ts
 import { NextResponse } from 'next/server';
-import { dbConnect } from '@/lib/db';
+import dbConnect from '@/lib/mongodb';
 import Notification from '@/models/Notification';
 import jwt from 'jsonwebtoken';
 
-export async function PUT(
+export async function DELETE(
   request: Request,
   { params }: { params: { id: string } }
 ) {
@@ -15,7 +15,7 @@ export async function PUT(
     if (!token) {
       return NextResponse.json({
         success: false,
-        error: 'Unauthorized'
+        error: 'Unauthorized - No token provided'
       }, { status: 401 });
     }
 
@@ -27,13 +27,23 @@ export async function PUT(
     if (decoded.role !== 'admin') {
       return NextResponse.json({
         success: false,
-        error: 'Unauthorized'
+        error: 'Forbidden - Admin access required'
       }, { status: 403 });
     }
 
+    const { id } = params;
+
+    if (!id) {
+      return NextResponse.json({
+        success: false,
+        error: 'Notification ID is required'
+      }, { status: 400 });
+    }
+
+    // Soft delete - mark as deleted
     const notification = await Notification.findByIdAndUpdate(
-      params.id,
-      { isRead: true },
+      id,
+      { isDeleted: true },
       { new: true }
     );
 
@@ -46,14 +56,22 @@ export async function PUT(
 
     return NextResponse.json({
       success: true,
-      data: notification
+      message: 'Notification deleted successfully'
     });
 
   } catch (error: any) {
-    console.error('Error marking as read:', error);
+    console.error('Error deleting notification:', error);
+    
+    if (error.name === 'JsonWebTokenError') {
+      return NextResponse.json({
+        success: false,
+        error: 'Invalid token'
+      }, { status: 401 });
+    }
+
     return NextResponse.json({
       success: false,
-      error: error.message || 'Failed to mark as read'
+      error: error.message || 'Failed to delete notification'
     }, { status: 500 });
   }
 }

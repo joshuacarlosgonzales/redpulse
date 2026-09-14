@@ -4,15 +4,15 @@ import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { dbConnect } from '@/lib'
 import mongoose from 'mongoose'
-import User from '@/models/User'
-import Donor from '@/models/Donor'
+
+const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY
 
 export async function POST(request: Request) {
   try {
     await dbConnect()
     
     const body = await request.json()
-    const { email, password } = body
+    const { email, password, turnstileToken } = body
 
     console.log('🔍 Login attempt for:', email)
 
@@ -21,6 +21,37 @@ export async function POST(request: Request) {
       return NextResponse.json({
         success: false,
         error: 'Email and password are required'
+      }, { status: 400 })
+    }
+
+    // Verify Cloudflare Turnstile
+    if (!turnstileToken) {
+      return NextResponse.json({
+        success: false,
+        error: 'Security verification required'
+      }, { status: 400 })
+    }
+
+    // Verify Turnstile token
+    const turnstileFormData = new FormData()
+    turnstileFormData.append('secret', TURNSTILE_SECRET_KEY || '')
+    turnstileFormData.append('response', turnstileToken)
+
+    const turnstileResponse = await fetch(
+      'https://challenges.cloudflare.com/turnstile/v0/siteverify',
+      {
+        method: 'POST',
+        body: turnstileFormData,
+      }
+    )
+
+    const turnstileResult = await turnstileResponse.json()
+
+    if (!turnstileResult.success) {
+      console.error('Turnstile verification failed:', turnstileResult)
+      return NextResponse.json({
+        success: false,
+        error: 'Security verification failed. Please try again.'
       }, { status: 400 })
     }
 
@@ -36,11 +67,10 @@ export async function POST(request: Request) {
     const cleanEmail = email.trim().toLowerCase()
     const usersCollection = db.collection('users')
     
-    // Find the user using native driver
+    // Find the user
     let user = await usersCollection.findOne({ email: cleanEmail })
     
     if (!user) {
-      console.log('🔍 Trying case insensitive...')
       user = await usersCollection.findOne({ 
         email: { $regex: cleanEmail, $options: 'i' } 
       })
@@ -48,11 +78,6 @@ export async function POST(request: Request) {
 
     if (!user) {
       console.log('❌ User not found:', cleanEmail)
-      
-      // Show all users for debugging
-      const allUsers = await usersCollection.find({}).project({ email: 1, role: 1 }).toArray()
-      console.log('📊 All users in DB:', allUsers.map(u => ({ email: u.email, role: u.role })))
-      
       return NextResponse.json({
         success: false,
         error: 'Invalid credentials'
@@ -68,7 +93,6 @@ export async function POST(request: Request) {
 
     // Check if user is active
     if (!user.isActive) {
-      console.log('❌ User is inactive:', email)
       return NextResponse.json({
         success: false,
         error: 'Account is deactivated. Please contact support.'
@@ -77,7 +101,6 @@ export async function POST(request: Request) {
 
     // Check if hospital is approved
     if (user.role === 'hospital' && !user.isApproved) {
-      console.log('❌ Hospital not approved:', email)
       return NextResponse.json({
         success: false,
         error: 'Your hospital account is pending approval. Please wait for admin verification.'
@@ -86,7 +109,6 @@ export async function POST(request: Request) {
 
     // Check if donor is approved
     if (user.role === 'donor' && !user.isApproved) {
-      console.log('❌ Donor not approved:', email)
       return NextResponse.json({
         success: false,
         error: 'Your donor account is pending approval. Please wait for admin verification.'
@@ -103,19 +125,14 @@ export async function POST(request: Request) {
       }, { status: 401 })
     }
 
-    console.log('✅ Password valid for:', email)
-
     // Get donor data if donor role
     let donorData = null
     if (user.role === 'donor') {
       const donorsCollection = db.collection('donors')
       donorData = await donorsCollection.findOne({ email: user.email })
-      if (donorData) {
-        console.log(`✅ Found donor profile for ${user.email}`)
-      }
     }
 
-    // Create JWT token with role
+    // Create JWT token
     const token = jwt.sign(
       { 
         userId: user._id.toString(), 
@@ -127,7 +144,7 @@ export async function POST(request: Request) {
       { expiresIn: '7d' }
     )
 
-    // Build user data based on role
+    // Build user data
     const userData: any = {
       id: user._id.toString(),
       fullName: user.fullName,
@@ -192,8 +209,6 @@ export async function POST(request: Request) {
     } else if (user.role === 'admin') {
       userData.status = 'active'
     }
-
-    console.log(`✅ Login successful: ${user.email} (${user.role})`)
 
     return NextResponse.json({
       success: true,

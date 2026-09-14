@@ -82,13 +82,11 @@ interface Donor {
   points?: number;
   emergencyName?: string;
   emergencyRelationship?: string;
-  // Background check fields
   backgroundCheckStatus?: 'pending' | 'cleared' | 'failed' | 'in-review';
   backgroundCheckDate?: string;
   backgroundCheckNotes?: string;
   verifiedBy?: string;
   verificationDate?: string;
-  // Event registration fields
   registeredEvents?: {
     eventId: string;
     eventTitle: string;
@@ -97,6 +95,14 @@ interface Donor {
     registeredAt: string;
   }[];
   upcomingEventsCount?: number;
+  donationHistory?: any[];
+  attendedEventsCount?: number;
+  pagination?: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  };
 }
 
 const bloodTypes = ["All", "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
@@ -114,6 +120,7 @@ export default function HospitalDonorsPage() {
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [showBackgroundCheckModal, setShowBackgroundCheckModal] = useState(false);
   const [showEventsModal, setShowEventsModal] = useState(false);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [rejectionReason, setRejectionReason] = useState("");
   const [backgroundCheckNotes, setBackgroundCheckNotes] = useState("");
   const [backgroundCheckStatus, setBackgroundCheckStatus] = useState<'pending' | 'cleared' | 'failed' | 'in-review'>('pending');
@@ -125,6 +132,13 @@ export default function HospitalDonorsPage() {
     limit: 10,
     totalPages: 0,
   });
+
+  // ✅ History pagination states
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyLimit] = useState(10);
+  const [historyTotal, setHistoryTotal] = useState(0);
+  const [historyTotalPages, setHistoryTotalPages] = useState(0);
+  const [loadingHistory, setLoadingHistory] = useState(false);
 
   const showToast = (type: 'success' | 'error' | 'info', message: string) => {
     setToast({ type, message });
@@ -186,9 +200,11 @@ export default function HospitalDonorsPage() {
           userId: donor.userId || '',
           backgroundCheckStatus: donor.backgroundCheckStatus || 'pending',
           registeredEvents: donor.registeredEvents || [],
+          donationHistory: donor.donationHistory || [],
           upcomingEventsCount: donor.registeredEvents?.filter((e: any) => 
             new Date(e.eventDate) > new Date() && e.status === 'registered'
           ).length || 0,
+          attendedEventsCount: donor.attendedEventsCount || 0,
         };
       });
       
@@ -205,6 +221,71 @@ export default function HospitalDonorsPage() {
   useEffect(() => {
     fetchDonors();
   }, [fetchDonors]);
+
+  // ✅ FIX: Fetch donor details with paginated donation history
+  const fetchDonorDetails = async (donor: Donor, page: number = 1, limit: number = 10) => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        showToast('error', 'Please login again');
+        return;
+      }
+
+      setLoadingHistory(true);
+      setSelectedDonor(donor);
+      setShowHistoryModal(true);
+
+      // Fetch fresh donor details from the API with pagination
+      const response = await fetch(`/api/hospital/donors/${donor.id}?page=${page}&limit=${limit}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch donor details');
+      }
+
+      const data = await response.json();
+      console.log('📦 Donor details response:', JSON.stringify(data, null, 2));
+
+      if (data.success && data.donor) {
+        const donationHistory = data.donor.donationHistory || [];
+        
+        const updatedDonor = {
+          ...donor,
+          ...data.donor,
+          donationHistory: donationHistory,
+          registeredEvents: data.donor.registeredEvents || [],
+          totalDonations: donationHistory.filter((d: any) => d.status === 'completed').length || data.donor.totalDonations || 0,
+          attendedEventsCount: data.donor.attendedEventsCount || 0,
+          pagination: data.donor.pagination || null,
+        };
+        
+        console.log(`📊 Loaded ${donationHistory.length} donation records for ${updatedDonor.fullName}`);
+        
+        setSelectedDonor(updatedDonor);
+        
+        // Update pagination info
+        if (data.donor.pagination) {
+          setHistoryPage(data.donor.pagination.page);
+          setHistoryTotal(data.donor.pagination.total);
+          setHistoryTotalPages(data.donor.pagination.totalPages);
+        }
+        
+        // Also update in the donors list
+        setDonors(prev => prev.map(d => 
+          d.id === donor.id ? updatedDonor : d
+        ));
+      }
+    } catch (error: any) {
+      console.error('❌ Error fetching donor details:', error);
+      showToast('error', error.message || 'Failed to fetch donor details');
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
 
   const handleApprove = async (donorId: string) => {
     try {
@@ -559,7 +640,7 @@ export default function HospitalDonorsPage() {
         <div className="bg-white dark:bg-zinc-900 rounded-2xl p-4 shadow-sm border border-zinc-200/60 dark:border-zinc-800/60">
           <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">Event Registered</p>
           <p className="text-2xl font-bold text-blue-600 dark:text-blue-400 mt-1">
-            {donors.filter(d => d.upcomingEventsCount && d.upcomingEventsCount > 0).length}
+            {donors.filter(d => (d.registeredEvents?.length || 0) > 0).length}
           </p>
         </div>
       </div>
@@ -719,11 +800,11 @@ export default function HospitalDonorsPage() {
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      {donor.upcomingEventsCount && donor.upcomingEventsCount > 0 ? (
+                      {donor.registeredEvents && donor.registeredEvents.length > 0 ? (
                         <div className="flex items-center gap-1">
                           <CalendarCheck className="w-4 h-4 text-blue-500" />
                           <span className="text-sm font-medium text-blue-600 dark:text-blue-400">
-                            {donor.upcomingEventsCount}
+                            {donor.registeredEvents.length}
                           </span>
                           <button
                             onClick={() => {
@@ -792,6 +873,14 @@ export default function HospitalDonorsPage() {
                           title="View Details"
                         >
                           <Eye className="w-4 h-4 text-zinc-400 group-hover:text-zinc-600" />
+                        </button>
+                        {/* History button - fetches fresh data with pagination */}
+                        <button
+                          onClick={() => fetchDonorDetails(donor, 1, 10)}
+                          className="p-1.5 hover:bg-blue-100 dark:hover:bg-blue-950/30 rounded-lg transition group"
+                          title="View History"
+                        >
+                          <History className="w-4 h-4 text-blue-500 group-hover:text-blue-600" />
                         </button>
                       </div>
                     </td>
@@ -1049,58 +1138,6 @@ export default function HospitalDonorsPage() {
                 </div>
               </div>
 
-              {/* Medical Information */}
-              {(selectedDonor.medicalConditions || selectedDonor.currentMedications) && (
-                <div className="border-t border-zinc-200/60 dark:border-zinc-800/60 pt-4">
-                  <h4 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300 flex items-center gap-2 mb-3">
-                    <Activity className="w-4 h-4" /> Medical Information
-                  </h4>
-                  <div className="space-y-2">
-                    {selectedDonor.medicalConditions && (
-                      <div>
-                        <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">Medical Conditions</p>
-                        <p className="text-sm text-zinc-900 dark:text-white">{selectedDonor.medicalConditions}</p>
-                      </div>
-                    )}
-                    {selectedDonor.currentMedications && (
-                      <div>
-                        <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">Current Medications</p>
-                        <p className="text-sm text-zinc-900 dark:text-white">{selectedDonor.currentMedications}</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Emergency Contact */}
-              {(selectedDonor.emergencyContact || selectedDonor.emergencyName) && (
-                <div className="border-t border-zinc-200/60 dark:border-zinc-800/60 pt-4">
-                  <h4 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300 flex items-center gap-2 mb-3">
-                    <Phone className="w-4 h-4" /> Emergency Contact
-                  </h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {selectedDonor.emergencyName && (
-                      <div>
-                        <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">Name</p>
-                        <p className="text-sm text-zinc-900 dark:text-white">{selectedDonor.emergencyName}</p>
-                      </div>
-                    )}
-                    {selectedDonor.emergencyContact && (
-                      <div>
-                        <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">Contact Number</p>
-                        <p className="text-sm text-zinc-900 dark:text-white">{selectedDonor.emergencyContact}</p>
-                      </div>
-                    )}
-                    {selectedDonor.emergencyRelationship && (
-                      <div>
-                        <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">Relationship</p>
-                        <p className="text-sm text-zinc-900 dark:text-white">{selectedDonor.emergencyRelationship}</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
               {/* Admin Actions */}
               {selectedDonor.status === 'pending' && (
                 <div className="flex flex-wrap gap-3 pt-4 border-t border-zinc-200/60 dark:border-zinc-800/60">
@@ -1352,7 +1389,7 @@ export default function HospitalDonorsPage() {
                             </span>
                             <span className="text-xs text-zinc-500 dark:text-zinc-400 flex items-center gap-1">
                               <ClockIcon className="w-3 h-3" />
-                              {new Date(event.registeredAt).toLocaleDateString()}
+                              {event.registeredAt ? new Date(event.registeredAt).toLocaleDateString() : 'N/A'}
                             </span>
                           </div>
                         </div>
@@ -1381,6 +1418,203 @@ export default function HospitalDonorsPage() {
                   setSelectedDonor(null);
                 }}
                 className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ✅ FIX: Donation History Modal with Pagination */}
+      {showHistoryModal && selectedDonor && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl max-w-4xl w-full max-h-[85vh] overflow-hidden shadow-2xl">
+            <div className="p-6 border-b border-zinc-200/60 dark:border-zinc-800/60 flex items-center justify-between sticky top-0 bg-white dark:bg-zinc-900 z-10">
+              <div>
+                <h3 className="text-xl font-semibold text-zinc-900 dark:text-white flex items-center gap-2">
+                  <History className="w-5 h-5 text-red-500" />
+                  Donation History
+                </h3>
+                <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                  {selectedDonor.fullName} • {selectedDonor.bloodType} • 
+                  Total: {selectedDonor.pagination?.total || selectedDonor.donationHistory?.length || 0} donations
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setShowHistoryModal(false);
+                  setSelectedDonor(null);
+                  setHistoryPage(1);
+                }}
+                className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition"
+              >
+                <X className="w-5 h-5 text-zinc-500" />
+              </button>
+            </div>
+            
+            <div className="p-6 overflow-y-auto max-h-[60vh]">
+              {loadingHistory ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="w-8 h-8 text-red-500 animate-spin" />
+                  <span className="ml-3 text-zinc-500 dark:text-zinc-400">Loading donation history...</span>
+                </div>
+              ) : selectedDonor.donationHistory && selectedDonor.donationHistory.length > 0 ? (
+                <div className="space-y-4">
+                  {/* Summary stats at top */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 p-4 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg">
+                    <div>
+                      <p className="text-xs text-zinc-500 dark:text-zinc-400">Total Donations</p>
+                      <p className="text-lg font-bold text-zinc-900 dark:text-white">
+                        {selectedDonor.pagination?.total || selectedDonor.donationHistory.length}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-zinc-500 dark:text-zinc-400">Completed</p>
+                      <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400">
+                        {selectedDonor.donationHistory.filter((d: any) => d.status === 'completed').length}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-zinc-500 dark:text-zinc-400">Total Units</p>
+                      <p className="text-lg font-bold text-blue-600 dark:text-blue-400">
+                        {selectedDonor.donationHistory.reduce((sum: number, d: any) => sum + (d.units || 0), 0)}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-zinc-500 dark:text-zinc-400">Last Donation</p>
+                      <p className="text-sm font-medium text-zinc-900 dark:text-white">
+                        {selectedDonor.donationHistory.length > 0 
+                          ? new Date(selectedDonor.donationHistory[0]?.donationDate || selectedDonor.donationHistory[0]?.date).toLocaleDateString() 
+                          : 'N/A'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Donation list - ALL donations, newest first */}
+                  {selectedDonor.donationHistory.map((donation: any, index: number) => (
+                    <div 
+                      key={donation.id || donation.donationId || index} 
+                      className="p-4 bg-white dark:bg-zinc-800/30 rounded-lg border border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 dark:hover:border-zinc-600 transition"
+                    >
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="text-sm font-semibold text-zinc-900 dark:text-white">
+                              {donation.eventTitle || 'Blood Donation'}
+                            </p>
+                            {/* Status badge */}
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                              donation.status === 'completed' 
+                                ? 'bg-emerald-100 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400'
+                                : donation.status === 'pending'
+                                ? 'bg-amber-100 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400'
+                                : 'bg-red-100 dark:bg-red-950/30 text-red-700 dark:text-red-400'
+                            }`}>
+                              {donation.status || 'Pending'}
+                            </span>
+                            {donation.isWalkIn && (
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 dark:bg-purple-950/30 text-purple-700 dark:text-purple-400">
+                                Walk-in
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1">
+                            <p className="text-xs text-zinc-500 dark:text-zinc-400 flex items-center gap-1">
+                              <Calendar className="w-3 h-3" />
+                              {donation.donationDate || donation.date 
+                                ? new Date(donation.donationDate || donation.date).toLocaleDateString() 
+                                : 'Date not specified'}
+                            </p>
+                            <p className="text-xs text-zinc-500 dark:text-zinc-400 flex items-center gap-1">
+                              <Droplet className="w-3 h-3" />
+                              {donation.bloodType || selectedDonor.bloodType}
+                            </p>
+                            <p className="text-xs text-zinc-500 dark:text-zinc-400 flex items-center gap-1">
+                              <span className="font-medium">Units:</span> {donation.units || 0}
+                            </p>
+                            {donation.hospital && (
+                              <p className="text-xs text-zinc-500 dark:text-zinc-400 flex items-center gap-1">
+                                <MapPin className="w-3 h-3" />
+                                {donation.hospital}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {donation.notes && (
+                            <span className="text-xs text-zinc-400 dark:text-zinc-500 max-w-[200px] truncate" title={donation.notes}>
+                              📝 {donation.notes}
+                            </span>
+                          )}
+                          <span className="text-xs text-zinc-400 dark:text-zinc-500">
+                            #{((historyPage - 1) * historyLimit) + index + 1}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+
+                  {/* ✅ Pagination controls for history */}
+                  {selectedDonor.pagination && selectedDonor.pagination.total > selectedDonor.pagination.limit && (
+                    <div className="flex items-center justify-between pt-4 border-t border-zinc-200/60 dark:border-zinc-800/60 mt-4">
+                      <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                        Showing {selectedDonor.donationHistory.length} of {selectedDonor.pagination.total} donations
+                      </p>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => {
+                            if (selectedDonor && historyPage > 1) {
+                              fetchDonorDetails(selectedDonor, historyPage - 1, historyLimit);
+                            }
+                          }}
+                          disabled={historyPage === 1 || loadingHistory}
+                          className="px-3 py-1.5 text-sm font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                        >
+                          <ChevronLeft className="w-4 h-4" />
+                          Previous
+                        </button>
+                        <span className="text-sm text-zinc-600 dark:text-zinc-400 px-2">
+                          {historyPage} / {historyTotalPages}
+                        </span>
+                        <button
+                          onClick={() => {
+                            if (selectedDonor && historyPage < historyTotalPages) {
+                              fetchDonorDetails(selectedDonor, historyPage + 1, historyLimit);
+                            }
+                          }}
+                          disabled={historyPage === historyTotalPages || loadingHistory}
+                          className="px-3 py-1.5 text-sm font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                        >
+                          Next
+                          <ChevronRight className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-center py-12">
+                  <History className="w-16 h-16 text-zinc-300 dark:text-zinc-600 mx-auto mb-3" />
+                  <p className="text-zinc-500 dark:text-zinc-400">No donation history found.</p>
+                  <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1">
+                    This donor hasn't made any donations at this hospital yet.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="p-6 border-t border-zinc-200/60 dark:border-zinc-800/60 flex justify-between items-center">
+              <p className="text-xs text-zinc-400 dark:text-zinc-500">
+                Showing {selectedDonor.donationHistory?.length || 0} of {selectedDonor.pagination?.total || 0} donation records
+              </p>
+              <button
+                onClick={() => {
+                  setShowHistoryModal(false);
+                  setSelectedDonor(null);
+                  setHistoryPage(1);
+                }}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-xl transition"
               >
                 Close
               </button>

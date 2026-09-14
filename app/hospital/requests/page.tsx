@@ -3,7 +3,6 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import {
   Droplet,
   Search,
@@ -17,14 +16,14 @@ import {
   Eye,
   Check,
   X,
-  Plus,
   Loader2,
   RefreshCw,
-  Trash2,
-  Filter,
-  ArrowUpRight,
-  ArrowDownRight
+  MessageSquare,
+  Send,
+  Package,
+  ArrowUpRight
 } from "lucide-react";
+import ReleaseBloodModal, { ReleaseData } from "@/components/releaseblood/ReleaseBloodModal";
 
 const bloodTypes = ["All", "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
 const urgencyLevels = ["All", "Critical", "Urgent", "Normal"];
@@ -55,6 +54,15 @@ interface BloodRequest {
   contactNumber?: string;
   createdAt: string;
   updatedAt: string;
+  rejectionReason?: string;
+}
+
+interface InventoryCheck {
+  available: boolean;
+  availableUnits: number;
+  requestedUnits: number;
+  bloodType: string;
+  message: string;
 }
 
 export default function BloodInquiriesPage() {
@@ -65,16 +73,49 @@ export default function BloodInquiriesPage() {
   const [selectedUrgency, setSelectedUrgency] = useState("All");
   const [selectedRequest, setSelectedRequest] = useState<BloodRequest | null>(null);
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
+  const [isRejectModalOpen, setIsRejectModalOpen] = useState(false);
+  const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
+  const [rejectRequestId, setRejectRequestId] = useState<string | null>(null);
+  const [approveRequestId, setApproveRequestId] = useState<string | null>(null);
+  const [inventoryCheck, setInventoryCheck] = useState<InventoryCheck | null>(null);
   const [requests, setRequests] = useState<BloodRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [toast, setToast] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
+  const [toast, setToast] = useState<{ type: 'success' | 'error' | 'info' | 'warning'; message: string } | null>(null);
+  
+  // State for Release Blood Modal
+  const [showReleaseModal, setShowReleaseModal] = useState(false);
+  const [releaseRequestData, setReleaseRequestData] = useState<ReleaseData | null>(null);
+  const [inventory, setInventory] = useState<any[]>([]);
 
-  const showToast = (type: 'success' | 'error' | 'info', message: string) => {
+  const showToast = (type: 'success' | 'error' | 'info' | 'warning', message: string) => {
     setToast({ type, message });
     setTimeout(() => setToast(null), 5000);
   };
+
+  // Fetch inventory for the release modal
+  const fetchInventory = useCallback(async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+
+      const response = await fetch('/api/hospital/inventory', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setInventory(data.data || []);
+      }
+    } catch (error) {
+      console.error('Error fetching inventory:', error);
+    }
+  }, []);
 
   // Fetch inquiries from API
   const fetchInquiries = useCallback(async () => {
@@ -90,7 +131,6 @@ export default function BloodInquiriesPage() {
       if (searchTerm) params.append('search', searchTerm);
       if (selectedUrgency !== 'All') params.append('urgency', selectedUrgency.toLowerCase());
       
-      // Fetch all requests first (we'll filter by status on client)
       const response = await fetch(`/api/hospital/requests?${params.toString()}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -110,19 +150,91 @@ export default function BloodInquiriesPage() {
 
       const data = await response.json();
       setRequests(data.data || []);
+      
+      // Also fetch inventory for the release modal
+      await fetchInventory();
     } catch (error) {
       console.error('Error fetching inquiries:', error);
       showToast('error', 'Failed to load inquiries. Please try again.');
     } finally {
       setLoading(false);
     }
-  }, [searchTerm, selectedUrgency, router]);
+  }, [searchTerm, selectedUrgency, router, fetchInventory]);
 
-  // Update inquiry status
-  const updateInquiryStatus = async (id: string, status: 'approved' | 'completed' | 'rejected') => {
+  // Check inventory before approving
+  const checkInventory = async (request: BloodRequest) => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch('/api/hospital/inventory/check', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          bloodType: request.bloodType,
+          units: request.quantity
+        })
+      });
+
+      const data = await response.json();
+      setInventoryCheck(data);
+      return data;
+    } catch (error) {
+      console.error('Error checking inventory:', error);
+      showToast('error', 'Failed to check inventory availability');
+      return null;
+    }
+  };
+
+  // Update inquiry status - ONLY accepts 'approved' or 'rejected'
+  const updateInquiryStatus = async (id: string, status: 'approved' | 'rejected', reason?: string) => {
+    // Validate status before making the API call
+    if (status !== 'approved' && status !== 'rejected') {
+      console.error('Invalid status:', status);
+      showToast('error', `Invalid status: ${status}. Only 'approved' or 'rejected' are allowed.`);
+      return;
+    }
+
     try {
       setProcessingId(id);
       const token = localStorage.getItem('token');
+      
+      const body: any = { status };
+      
+      if (status === 'rejected' && reason) {
+        body.rejectionReason = reason;
+      }
+
+      // If approving, find the request to get details
+      if (status === 'approved') {
+        const request = requests.find(r => r.id === id);
+        if (request) {
+          // Check inventory first
+          const inventoryData = await checkInventory(request);
+          if (!inventoryData || !inventoryData.available) {
+            showToast('warning', `⚠️ Insufficient inventory for ${request.bloodType}. Available: ${inventoryData?.availableUnits || 0} units`);
+            setProcessingId(null);
+            return;
+          }
+
+          // Add release data to the approval
+          body.releaseData = {
+            patientName: request.patientName || 'Unknown Patient',
+            patientAge: request.patientAge,
+            hospitalWard: request.department || 'General Ward',
+            doctorName: request.doctorName || 'Unknown Doctor',
+            reason: `Blood request approved - ${request.urgency} need`,
+            releaseDate: new Date().toISOString(),
+            notes: request.notes || '',
+            requestId: request.id,
+            donorName: request.donorName,
+            donorEmail: request.donorEmail,
+            donorPhone: request.donorPhone,
+            donorBloodType: request.donorBloodType || request.bloodType
+          };
+        }
+      }
       
       const response = await fetch(`/api/hospital/requests?id=${id}`, {
         method: 'PUT',
@@ -130,21 +242,37 @@ export default function BloodInquiriesPage() {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ 
-          status: status === 'completed' ? 'fulfilled' : status 
-        })
+        body: JSON.stringify(body)
       });
 
+      const data = await response.json();
+
       if (!response.ok) {
-        const data = await response.json();
         throw new Error(data.error || 'Failed to update status');
       }
-
-      const statusLabel = status === 'approved' ? 'approved' : status === 'completed' ? 'marked as completed' : 'rejected';
-      showToast('success', `Inquiry ${statusLabel} successfully! ✅`);
       
-      // Remove the updated request from the list
+      const statusLabel = status === 'approved' ? 'approved and released' : 'rejected';
+      showToast('success', `✅ Inquiry ${statusLabel} successfully!`);
+      
+      // If approved, show release info
+      if (status === 'approved' && data.release) {
+        showToast('info', `🩸 ${data.release.units} unit(s) of ${data.release.bloodType} released from inventory for ${data.release.patientName}`);
+        
+        // Show donor notification sent
+        if (data.notificationSent) {
+          showToast('success', `📧 Receipt sent to donor: ${data.release.donorEmail}`);
+        }
+      }
+      
+      // If rejected, show donor notified
+      if (status === 'rejected' && data.notificationSent) {
+        showToast('info', `📧 Rejection notification sent to donor`);
+      }
+      
       setRequests(prev => prev.filter(r => r.id !== id));
+      setIsConfirmModalOpen(false);
+      setApproveRequestId(null);
+      setInventoryCheck(null);
     } catch (error) {
       console.error('Error updating inquiry:', error);
       showToast('error', error instanceof Error ? error.message : 'Failed to update inquiry status.');
@@ -153,35 +281,116 @@ export default function BloodInquiriesPage() {
     }
   };
 
-  // Delete inquiry
-  const deleteInquiry = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this inquiry?')) return;
+  // Handle approve click - show confirmation modal with inventory check
+  const handleApproveClick = async (id: string) => {
+    const request = requests.find(r => r.id === id);
+    if (!request) return;
+    
+    // Check inventory first
+    const inventoryData = await checkInventory(request);
+    if (!inventoryData || !inventoryData.available) {
+      showToast('warning', `⚠️ Insufficient inventory for ${request.bloodType}. Available: ${inventoryData?.availableUnits || 0} units`);
+      return;
+    }
 
+    // Open release modal with pre-filled data
+    setReleaseRequestData({
+      bloodType: request.bloodType,
+      units: request.quantity,
+      patientName: request.patientName || '',
+      patientAge: request.patientAge,
+      hospitalWard: request.department || '',
+      doctorName: request.doctorName || '',
+      reason: `Blood request approved - ${request.urgency} need`,
+      releaseDate: new Date().toISOString().split('T')[0],
+      notes: request.notes || '',
+      requestId: request.id,
+      donorName: request.donorName,
+      donorEmail: request.donorEmail,
+      donorPhone: request.donorPhone,
+      donorBloodType: request.donorBloodType || request.bloodType
+    });
+    setShowReleaseModal(true);
+  };
+
+  // Handle release from modal - THIS IS WHERE THE STATUS IS SET
+  const handleReleaseFromModal = async (releaseData: ReleaseData) => {
     try {
-      setProcessingId(id);
+      // Call the API to release blood and approve request
       const token = localStorage.getItem('token');
       
-      const response = await fetch(`/api/hospital/requests?id=${id}`, {
-        method: 'DELETE',
+      const body: any = {
+        status: 'approved', // ✅ This is the correct status
+        releaseData: releaseData
+      };
+
+      const response = await fetch(`/api/hospital/requests?id=${releaseData.requestId}`, {
+        method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
-        }
+        },
+        body: JSON.stringify(body)
       });
 
+      const data = await response.json();
+
       if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || 'Failed to delete inquiry');
+        throw new Error(data.error || 'Failed to approve request');
       }
 
-      showToast('success', 'Inquiry deleted successfully! 🗑️');
-      setRequests(prev => prev.filter(r => r.id !== id));
+      showToast('success', `✅ Request approved and ${releaseData.units} unit(s) released!`);
+      
+      if (data.notificationSent) {
+        showToast('success', `📧 Receipt sent to donor: ${releaseData.donorEmail}`);
+      }
+
+      // Remove the request from the list
+      setRequests(prev => prev.filter(r => r.id !== releaseData.requestId));
+      setShowReleaseModal(false);
+      setReleaseRequestData(null);
+      
+      // Refresh inventory
+      await fetchInventory();
     } catch (error) {
-      console.error('Error deleting inquiry:', error);
-      showToast('error', error instanceof Error ? error.message : 'Failed to delete inquiry.');
-    } finally {
-      setProcessingId(null);
+      console.error('Error approving request:', error);
+      showToast('error', error instanceof Error ? error.message : 'Failed to approve request');
+      throw error;
     }
+  };
+
+  // Handle reject with reason
+  const handleRejectClick = (id: string) => {
+    setRejectRequestId(id);
+    setRejectReason("");
+    setIsRejectModalOpen(true);
+  };
+
+  const handleConfirmReject = async () => {
+    if (!rejectReason.trim()) {
+      showToast('error', 'Please provide a reason for rejection.');
+      return;
+    }
+    
+    if (rejectRequestId) {
+      // ✅ Passing 'rejected' as the status
+      await updateInquiryStatus(rejectRequestId, 'rejected', rejectReason.trim());
+      setIsRejectModalOpen(false);
+      setRejectReason("");
+      setRejectRequestId(null);
+    }
+  };
+
+  // Handle marking as completed - THIS IS WHERE THE ISSUE WAS
+  // The API doesn't accept 'completed' as a status, so we need to handle this differently
+  // The API only accepts 'approved' or 'rejected' for the PUT endpoint
+  // So we need to either remove this functionality or implement it differently
+  const handleMarkAsCompleted = async (id: string) => {
+    // Since the API only accepts 'approved' or 'rejected', 
+    // we'll just show a message that this feature is not available
+    // or we could update the status in the local state only
+    showToast('info', 'Completed status is managed automatically when blood is released.');
+    // Optionally, you could call a different API endpoint here if one exists
   };
 
   // Load inquiries on mount and when filters change
@@ -203,14 +412,10 @@ export default function BloodInquiriesPage() {
 
   // Filter inquiries based on active tab, blood type, and urgency
   const filteredInquiries = requests.filter(inquiry => {
-    // Tab filter
     if (activeTab === 'pending' && inquiry.status !== 'pending') return false;
     if (activeTab === 'approved' && !['approved', 'fulfilled'].includes(inquiry.status)) return false;
     if (activeTab === 'completed' && !['fulfilled', 'cancelled', 'rejected'].includes(inquiry.status)) return false;
-
-    // Blood type filter
     if (selectedBloodType !== "All" && inquiry.bloodType !== selectedBloodType) return false;
-
     return true;
   });
 
@@ -278,11 +483,14 @@ export default function BloodInquiriesPage() {
             ? 'bg-green-50 dark:bg-green-950/90 border-green-200 dark:border-green-800 text-green-700 dark:text-green-300'
             : toast.type === 'error'
             ? 'bg-red-50 dark:bg-red-950/90 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300'
+            : toast.type === 'warning'
+            ? 'bg-yellow-50 dark:bg-yellow-950/90 border-yellow-200 dark:border-yellow-800 text-yellow-700 dark:text-yellow-300'
             : 'bg-blue-50 dark:bg-blue-950/90 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300'
         }`}>
           <div className="flex items-center gap-3">
             {toast.type === 'success' && <CheckCircle className="h-5 w-5 flex-shrink-0" />}
             {toast.type === 'error' && <AlertCircle className="h-5 w-5 flex-shrink-0" />}
+            {toast.type === 'warning' && <AlertCircle className="h-5 w-5 flex-shrink-0" />}
             {toast.type === 'info' && <AlertCircle className="h-5 w-5 flex-shrink-0" />}
             <p className="text-sm font-medium">{toast.message}</p>
           </div>
@@ -297,7 +505,7 @@ export default function BloodInquiriesPage() {
             Blood Inquiries
           </h1>
           <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-            Manage blood requests from donors
+            Manage blood requests from donors with automatic inventory deduction
           </p>
         </div>
         <div className="flex gap-2">
@@ -446,6 +654,18 @@ export default function BloodInquiriesPage() {
                         <span className={`px-2 py-1 text-xs font-medium rounded-full ${getUrgencyColor(inquiry.urgency)}`}>
                           {inquiry.urgency.charAt(0).toUpperCase() + inquiry.urgency.slice(1)}
                         </span>
+                        {inquiry.status === 'rejected' && inquiry.rejectionReason && (
+                          <span className="px-2 py-1 text-xs font-medium rounded-full bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 flex items-center gap-1">
+                            <MessageSquare className="w-3 h-3" />
+                            Rejected
+                          </span>
+                        )}
+                        {inquiry.status === 'approved' && (
+                          <span className="px-2 py-1 text-xs font-medium rounded-full bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 flex items-center gap-1">
+                            <CheckCircle className="w-3 h-3" />
+                            Released
+                          </span>
+                        )}
                       </div>
                       <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
                         <div className="flex items-center gap-2 text-zinc-600 dark:text-zinc-400">
@@ -472,6 +692,14 @@ export default function BloodInquiriesPage() {
                           </div>
                         )}
                       </div>
+                      {inquiry.status === 'rejected' && inquiry.rejectionReason && (
+                        <div className="mt-2 p-2 bg-red-50 dark:bg-red-950/20 rounded-lg border border-red-200 dark:border-red-800/30">
+                          <p className="text-xs text-red-700 dark:text-red-400 flex items-start gap-1.5">
+                            <MessageSquare className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                            <span><span className="font-medium">Rejection reason:</span> {inquiry.rejectionReason}</span>
+                          </p>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -492,10 +720,10 @@ export default function BloodInquiriesPage() {
                   {inquiry.status === 'pending' && (
                     <>
                       <button
-                        onClick={() => updateInquiryStatus(inquiry.id, 'approved')}
+                        onClick={() => handleApproveClick(inquiry.id)}
                         disabled={processingId === inquiry.id}
                         className="p-2 text-green-500 hover:text-green-700 rounded-lg hover:bg-green-50 dark:hover:bg-green-900/20 transition disabled:opacity-50"
-                        title="Approve"
+                        title="Approve & Release"
                       >
                         {processingId === inquiry.id ? (
                           <Loader2 className="w-4 h-4 animate-spin" />
@@ -504,32 +732,7 @@ export default function BloodInquiriesPage() {
                         )}
                       </button>
                       <button
-                        onClick={() => deleteInquiry(inquiry.id)}
-                        disabled={processingId === inquiry.id}
-                        className="p-2 text-red-500 hover:text-red-700 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition disabled:opacity-50"
-                        title="Delete"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </>
-                  )}
-
-                  {inquiry.status === 'approved' && (
-                    <>
-                      <button
-                        onClick={() => updateInquiryStatus(inquiry.id, 'completed')}
-                        disabled={processingId === inquiry.id}
-                        className="p-2 text-blue-500 hover:text-blue-700 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20 transition disabled:opacity-50"
-                        title="Mark as Completed"
-                      >
-                        {processingId === inquiry.id ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <CheckCircle className="w-4 h-4" />
-                        )}
-                      </button>
-                      <button
-                        onClick={() => updateInquiryStatus(inquiry.id, 'rejected')}
+                        onClick={() => handleRejectClick(inquiry.id)}
                         disabled={processingId === inquiry.id}
                         className="p-2 text-red-500 hover:text-red-700 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition disabled:opacity-50"
                         title="Reject"
@@ -538,12 +741,33 @@ export default function BloodInquiriesPage() {
                       </button>
                     </>
                   )}
+
+                  {/* REMOVED: The "Mark as Completed" button because the API doesn't accept 'completed' status */}
+                  {/* We only show actions for pending requests */}
+                  {inquiry.status === 'approved' && (
+                    <span className="text-xs text-zinc-500 dark:text-zinc-400 px-2 py-1 bg-zinc-100 dark:bg-zinc-800 rounded-lg">
+                      Release completed
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
           ))}
         </div>
       )}
+
+      {/* Release Blood Modal */}
+      <ReleaseBloodModal
+        isOpen={showReleaseModal}
+        onClose={() => {
+          setShowReleaseModal(false);
+          setReleaseRequestData(null);
+        }}
+        inventoryItems={inventory}
+        onRelease={handleReleaseFromModal}
+        isReleasing={processingId !== null}
+        releaseData={releaseRequestData || undefined}
+      />
 
       {/* Details Modal */}
       {isDetailsModalOpen && selectedRequest && (
@@ -574,6 +798,16 @@ export default function BloodInquiriesPage() {
                   {selectedRequest.urgency.charAt(0).toUpperCase() + selectedRequest.urgency.slice(1)}
                 </span>
               </div>
+
+              {selectedRequest.status === 'rejected' && selectedRequest.rejectionReason && (
+                <div className="p-4 bg-red-50 dark:bg-red-950/20 rounded-lg border border-red-200 dark:border-red-800/30">
+                  <h4 className="text-sm font-semibold text-red-700 dark:text-red-400 flex items-center gap-2 mb-2">
+                    <MessageSquare className="w-4 h-4" />
+                    Rejection Reason
+                  </h4>
+                  <p className="text-red-700 dark:text-red-400">{selectedRequest.rejectionReason}</p>
+                </div>
+              )}
 
               {/* Donor Info */}
               <div className="p-4 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg">
@@ -678,8 +912,8 @@ export default function BloodInquiriesPage() {
                   <>
                     <button
                       onClick={() => {
-                        updateInquiryStatus(selectedRequest.id, 'approved');
                         setIsDetailsModalOpen(false);
+                        handleApproveClick(selectedRequest.id);
                       }}
                       disabled={processingId === selectedRequest.id}
                       className="flex-1 px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-50"
@@ -689,42 +923,12 @@ export default function BloodInquiriesPage() {
                       ) : (
                         <Check className="w-4 h-4" />
                       )}
-                      Approve Request
+                      Approve & Release
                     </button>
                     <button
                       onClick={() => {
-                        deleteInquiry(selectedRequest.id);
                         setIsDetailsModalOpen(false);
-                      }}
-                      disabled={processingId === selectedRequest.id}
-                      className="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-50"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                      Delete
-                    </button>
-                  </>
-                )}
-                {selectedRequest.status === 'approved' && (
-                  <>
-                    <button
-                      onClick={() => {
-                        updateInquiryStatus(selectedRequest.id, 'completed');
-                        setIsDetailsModalOpen(false);
-                      }}
-                      disabled={processingId === selectedRequest.id}
-                      className="flex-1 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-50"
-                    >
-                      {processingId === selectedRequest.id ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : (
-                        <CheckCircle className="w-4 h-4" />
-                      )}
-                      Mark as Completed
-                    </button>
-                    <button
-                      onClick={() => {
-                        updateInquiryStatus(selectedRequest.id, 'rejected');
-                        setIsDetailsModalOpen(false);
+                        handleRejectClick(selectedRequest.id);
                       }}
                       disabled={processingId === selectedRequest.id}
                       className="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-50"
@@ -739,6 +943,75 @@ export default function BloodInquiriesPage() {
                   className="px-4 py-2.5 bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-lg hover:bg-zinc-300 dark:hover:bg-zinc-600 transition"
                 >
                   Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reject Modal */}
+      {isRejectModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xl max-w-md w-full">
+            <div className="p-6 border-b border-zinc-200/60 dark:border-zinc-800/60">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-bold text-zinc-900 dark:text-white flex items-center gap-2">
+                  <XCircle className="w-5 h-5 text-red-500" />
+                  Reject Inquiry
+                </h2>
+                <button
+                  onClick={() => {
+                    setIsRejectModalOpen(false);
+                    setRejectReason("");
+                    setRejectRequestId(null);
+                  }}
+                  className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition"
+                >
+                  <X className="w-5 h-5 text-zinc-500" />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                Please provide a respectful reason for rejecting this inquiry. This will be shared with the donor.
+              </p>
+              
+              <div>
+                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">
+                  Rejection Reason <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  value={rejectReason}
+                  onChange={(e) => setRejectReason(e.target.value)}
+                  placeholder="E.g., We currently have sufficient supply of this blood type. Thank you for your willingness to help!"
+                  rows={4}
+                  className="w-full px-3 py-2 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 text-zinc-900 dark:text-white placeholder:text-zinc-400"
+                />
+                <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                  This reason will be visible to the donor.
+                </p>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={handleConfirmReject}
+                  disabled={!rejectReason.trim()}
+                  className="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-lg transition flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <XCircle className="w-4 h-4" />
+                  Reject Inquiry
+                </button>
+                <button
+                  onClick={() => {
+                    setIsRejectModalOpen(false);
+                    setRejectReason("");
+                    setRejectRequestId(null);
+                  }}
+                  className="px-4 py-2.5 bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-lg hover:bg-zinc-300 dark:hover:bg-zinc-600 transition"
+                >
+                  Cancel
                 </button>
               </div>
             </div>

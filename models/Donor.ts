@@ -34,14 +34,19 @@ export interface IDonor extends Document {
   approvedBy?: string
   approvedAt?: Date
   rejectionReason?: string
-  // ✅ Add userId field
-  userId?: mongoose.Types.ObjectId
-  // ✅ Background check fields
+  // userId field - can be null for walk-in donors
+  userId?: mongoose.Types.ObjectId | null
+  // Background check fields
   backgroundCheckStatus?: 'pending' | 'in-review' | 'cleared' | 'failed'
   backgroundCheckDate?: Date
   backgroundCheckNotes?: string
   verifiedBy?: string
   verificationDate?: Date
+  // Walk-in donor specific fields
+  isWalkIn?: boolean
+  walkInDonorId?: string
+  // ✅ ADD THIS - Registration type field
+  registrationType?: 'system' | 'walk-in'
   createdAt: Date
   updatedAt: Date
 }
@@ -177,13 +182,14 @@ const DonorSchema: Schema<IDonor> = new Schema(
       type: String,
       trim: true,
     },
-    // userId field
+    // userId field - allow null for walk-in donors
     userId: {
       type: Schema.Types.ObjectId,
       ref: 'User',
       required: false,
+      default: null,
     },
-    // ✅ Background check fields
+    // Background check fields
     backgroundCheckStatus: {
       type: String,
       enum: ['pending', 'in-review', 'cleared', 'failed'],
@@ -206,6 +212,22 @@ const DonorSchema: Schema<IDonor> = new Schema(
       type: Date,
       default: null,
     },
+    // Walk-in donor specific fields
+    isWalkIn: {
+      type: Boolean,
+      default: false,
+    },
+    walkInDonorId: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
+    // ✅ ADD THIS - Registration type field
+    registrationType: {
+      type: String,
+      enum: ['system', 'walk-in'],
+      default: 'system',
+    },
   },
   {
     timestamps: true,
@@ -218,7 +240,10 @@ DonorSchema.index({ status: 1 })
 DonorSchema.index({ fullName: 1 })
 DonorSchema.index({ createdAt: -1 })
 DonorSchema.index({ userId: 1 })
-DonorSchema.index({ backgroundCheckStatus: 1 }) // ✅ Index for background check
+DonorSchema.index({ backgroundCheckStatus: 1 })
+DonorSchema.index({ isWalkIn: 1 })
+DonorSchema.index({ walkInDonorId: 1 })
+DonorSchema.index({ registrationType: 1 }) // ✅ Index for registration type
 
 // Virtuals
 DonorSchema.virtual('location').get(function() {

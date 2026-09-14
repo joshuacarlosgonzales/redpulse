@@ -1,135 +1,122 @@
-// app/hospital/layout.tsx
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import { HospitalNavbar } from '@/components/layouts/HospitalNavbar';
-import { HospitalSidebar } from '@/components/layouts/HospitalSidebar';
-import HospitalProfileModal from '@/components/hospital/HospitalProfileModal';
-import { HospitalSetupModal } from '@/components/hospital/HospitalSetupModal';
-import { Footer } from '@/components/layouts/Footer';
+import { useState } from "react";
+import { usePathname } from "next/navigation";
 
-export default function HospitalLayout({
+import {
+  SidebarProvider,
+  useSidebar,
+} from "@/components/ui/sidebar";
+
+import { HospitalNavbar } from "@/components/layouts/HospitalNavbar";
+import { HospitalSidebar } from "@/components/layouts/HospitalSidebar";
+
+import HospitalProfileModal from "@/components/hospital/HospitalProfileModal";
+import { HospitalSetupModal } from "@/components/hospital/HospitalSetupModal";
+import { Footer } from "@/components/layouts/Footer";
+
+// Inner component that has access to sidebar state
+function HospitalLayoutContent({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const pathname = usePathname();
+  const { state } = useSidebar();
+  const isCollapsed = state === "collapsed";
+
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showSetupModal, setShowSetupModal] = useState(false);
-  const [notifications, setNotifications] = useState<any[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
 
-  // Fetch notifications on mount
-  useEffect(() => {
-    fetchNotifications();
-  }, []);
+  /*
+   * =========================================================
+   * STANDALONE NOTIFICATIONS PAGE
+   * =========================================================
+   */
 
-  const fetchNotifications = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      if (!token) return;
-
-      const response = await fetch('/api/hospital/notifications', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setNotifications(data.data || []);
-        setUnreadCount(data.data?.filter((n: any) => !n.isRead).length || 0);
-      }
-    } catch (error) {
-      console.error('Error fetching notifications:', error);
-    }
-  };
-
-  const markAsRead = async (id: string) => {
-    try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`/api/hospital/notifications/${id}/read`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      if (response.ok) {
-        setNotifications(prev => 
-          prev.map(n => n.id === id ? { ...n, isRead: true } : n)
-        );
-        setUnreadCount(prev => Math.max(0, prev - 1));
-      }
-    } catch (error) {
-      console.error('Error marking as read:', error);
-    }
-  };
-
-  const markAllAsRead = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      const response = await fetch('/api/hospital/notifications/read-all', {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      if (response.ok) {
-        setNotifications(prev => 
-          prev.map(n => ({ ...n, isRead: true }))
-        );
-        setUnreadCount(0);
-      }
-    } catch (error) {
-      console.error('Error marking all as read:', error);
-    }
-  };
+  const isNotificationsPage = pathname === "/hospital/notifications";
 
   const handleProfileUpdate = () => {
-    // Refresh any data that needs to be updated after profile change
-    fetchNotifications();
+    // Hospital profile can be refreshed here if needed.
   };
 
   const handleSetupComplete = () => {
-    // Refresh data after setup is complete
-    fetchNotifications();
+    // Hospital profile can be refreshed here if needed.
   };
 
+  /*
+   * =========================================================
+   * NOTIFICATIONS PAGE
+   * =========================================================
+   */
+
+  if (isNotificationsPage) {
+    return (
+      <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
+        {children}
+      </div>
+    );
+  }
+
+  /*
+   * =========================================================
+   * NORMAL HOSPITAL LAYOUT
+   * =========================================================
+   */
+
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-black flex">
-      {/* Sidebar */}
-      <HospitalSidebar isOpen={isSidebarOpen} setIsOpen={setIsSidebarOpen} />
+    <div className="flex h-screen w-full overflow-hidden bg-zinc-50 dark:bg-black">
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col min-h-screen">
-        {/* Navbar */}
-        <HospitalNavbar 
-          onMenuClick={() => setIsSidebarOpen(!isSidebarOpen)}
-          unreadCount={unreadCount}
-          notifications={notifications}
-          onMarkAsRead={markAsRead}
-          onMarkAllAsRead={markAllAsRead}
-        />
+      {/* =================================================
+          HOSPITAL SIDEBAR - Fixed height
+      ================================================= */}
 
-        {/* Page Content */}
-        <main className="flex-1">
-          <div className="max-w-7xl mx-auto p-4 sm:p-6">
+      <div className="flex h-screen flex-shrink-0">
+        <HospitalSidebar />
+      </div>
+
+      {/* =================================================
+          MAIN AREA - Takes remaining space
+      ================================================= */}
+
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+
+        {/* =================================================
+            NAVBAR - Full width
+        ================================================= */}
+
+        <HospitalNavbar />
+
+        {/* =================================================
+            CONTENT - Scrollable
+        ================================================= */}
+
+        <main className="flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-7xl p-4 sm:p-6">
             {children}
           </div>
         </main>
 
-        {/* Footer */}
+        {/* =================================================
+            FOOTER
+        ================================================= */}
+
         <Footer />
       </div>
 
-      {/* Modals */}
+      {/* =================================================
+          PROFILE MODAL
+      ================================================= */}
+
       <HospitalProfileModal
         isOpen={showProfileModal}
         onClose={() => setShowProfileModal(false)}
         onUpdate={handleProfileUpdate}
       />
+
+      {/* =================================================
+          SETUP MODAL
+      ================================================= */}
 
       <HospitalSetupModal
         isOpen={showSetupModal}
@@ -137,5 +124,17 @@ export default function HospitalLayout({
         onSetupComplete={handleSetupComplete}
       />
     </div>
+  );
+}
+
+export default function HospitalLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <SidebarProvider defaultOpen={true}>
+      <HospitalLayoutContent>{children}</HospitalLayoutContent>
+    </SidebarProvider>
   );
 }

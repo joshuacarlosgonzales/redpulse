@@ -40,7 +40,6 @@ export async function GET(
       )
     }
 
-    // Await params for Next.js 15+
     const { id } = await params
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -50,10 +49,8 @@ export async function GET(
       )
     }
 
-    // Try to find by donor _id first
     let donor = await Donor.findById(id).lean()
     
-    // If not found, try to find by userId
     if (!donor) {
       donor = await Donor.findOne({ userId: id }).lean()
     }
@@ -65,7 +62,6 @@ export async function GET(
       )
     }
 
-    // Fetch user data separately if userId exists
     let userData = null
     if (donor.userId) {
       userData = await User.findById(donor.userId)
@@ -90,6 +86,7 @@ export async function GET(
       digitalId: donor.digitalId || '',
       emergencyContact: donor.emergencyContact || '',
       status: donor.status || 'pending',
+      registrationType: donor.registrationType || 'system',
       isEligible: donor.isEligible,
       totalDonations: donor.totalDonations || 0,
       lastDonationDate: donor.lastDonationDate,
@@ -163,7 +160,6 @@ export async function PUT(
       )
     }
 
-    // Await params for Next.js 15+
     const { id } = await params
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -198,7 +194,6 @@ export async function PUT(
       middleName,
     } = body
 
-    // Try to find by donor _id first, then by userId
     let donor = await Donor.findById(id)
     if (!donor) {
       donor = await Donor.findOne({ userId: id })
@@ -211,7 +206,6 @@ export async function PUT(
       )
     }
 
-    // Update donor fields
     if (fullName) donor.fullName = fullName
     if (email) donor.email = email
     if (phone) donor.phone = phone
@@ -236,7 +230,6 @@ export async function PUT(
 
     await donor.save()
 
-    // Update User model if needed
     if (donor.userId) {
       const updateData: any = {}
       if (fullName) updateData.fullName = fullName
@@ -303,7 +296,6 @@ export async function DELETE(
       )
     }
 
-    // Await params for Next.js 15+
     const { id } = await params
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -313,7 +305,6 @@ export async function DELETE(
       )
     }
 
-    // Try to find by donor _id first, then by userId
     let donor = await Donor.findById(id)
     if (!donor) {
       donor = await Donor.findOne({ userId: id })
@@ -326,14 +317,11 @@ export async function DELETE(
       )
     }
 
-    // Store donor info before deletion
     const donorName = donor.fullName
     const donorUserId = donor.userId
 
-    // Delete the donor
     await Donor.findByIdAndDelete(donor._id)
 
-    // Also delete the associated user if needed
     if (donorUserId) {
       await User.findByIdAndDelete(donorUserId)
     }

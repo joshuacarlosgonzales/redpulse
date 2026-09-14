@@ -4,6 +4,7 @@ import dbConnect from '@/lib/mongodb'
 import jwt from 'jsonwebtoken'
 import Donation from '@/models/Donation'
 import User from '@/models/User'
+import Donor from '@/models/Donor'
 
 export async function GET(request: NextRequest) {
   try {
@@ -18,9 +19,9 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authHeader.split(' ')[1]
-    
+
     let decoded: any;
-    
+
     try {
       decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret') as any
     } catch (jwtError) {
@@ -40,15 +41,37 @@ export async function GET(request: NextRequest) {
     }
 
     // Allow both donors and hospitals to view donations
-    // For hospitals, show donations made to their hospital
     let filter: any = {}
-    
+
     if (user.role === 'donor') {
-      filter.donorId = decoded.userId
+      // ✅ FIX: Get the actual donorId from the Donor model
+      // First try to find donor by userId
+      let donorProfile = await Donor.findOne({ userId: decoded.userId })
+      
+      // If not found by userId, try by email
+      if (!donorProfile) {
+        donorProfile = await Donor.findOne({ email: user.email })
+      }
+
+      if (donorProfile) {
+        // Use the donor's _id from the Donor model
+        filter.donorId = donorProfile._id
+        console.log(`🔍 Using donorId: ${donorProfile._id} for user: ${user.email}`)
+      } else {
+        // Fallback: try to find by donorId in donation records
+        // Check if any donations exist with this userId as donorId
+        const existingDonation = await Donation.findOne({ donorId: decoded.userId })
+        if (existingDonation) {
+          filter.donorId = decoded.userId
+          console.log(`⚠️ Using userId: ${decoded.userId} as donorId (found existing donations)`)
+        } else {
+          // Last resort: try to find by donorEmail
+          filter.donorEmail = user.email
+          console.log(`⚠️ Using donorEmail: ${user.email} as filter`)
+        }
+      }
     } else if (user.role === 'hospital') {
-      // Hospital users see donations made to their hospital
-      const hospitalName = user.hospitalName || user.fullName
-      filter.hospital = hospitalName
+      filter.hospitalId = decoded.userId
     } else {
       // Admin sees all
     }
@@ -63,10 +86,24 @@ export async function GET(request: NextRequest) {
 
     console.log('🔍 Fetching donations with filter:', JSON.stringify(filter, null, 2))
 
-    const donations = await Donation.find(filter)
+    let donations = await Donation.find(filter)
       .sort({ date: -1 })
       .limit(limit)
       .lean()
+
+    // ✅ If no donations found and we have a donorId, try alternative lookup
+    if (donations.length === 0 && filter.donorId) {
+      console.log('🔍 No donations found with donorId, trying by donorEmail...')
+      const donor = await Donor.findById(filter.donorId)
+      if (donor && donor.email) {
+        const emailFilter = { donorEmail: donor.email }
+        console.log('🔍 Trying email filter:', emailFilter)
+        donations = await Donation.find(emailFilter)
+          .sort({ date: -1 })
+          .limit(limit)
+          .lean()
+      }
+    }
 
     console.log(`📦 Found ${donations.length} donations`)
 

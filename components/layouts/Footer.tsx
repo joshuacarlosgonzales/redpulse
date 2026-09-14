@@ -1,67 +1,70 @@
 "use client";
 
-import Link from "next/link";
 import {
   Heart,
   ArrowUp,
+  Activity,
 } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
 
 export function Footer() {
   const scrollToTop = () => {
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    window.scrollTo({
+      top: 0,
+      behavior: "smooth",
+    });
   };
 
   return (
-    <footer className="border-t border-zinc-200/60 dark:border-zinc-800/60 bg-white/80 dark:bg-black/80 backdrop-blur-lg">
-      <div className="px-6 py-4">
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-          {/* Left Section - Brand & Copyright */}
-          <div className="flex items-center gap-4">
+    <footer className="border-t border-zinc-200/70 bg-white/80 backdrop-blur-xl dark:border-zinc-800/70 dark:bg-black/80">
+      <div className="px-4 py-4 sm:px-6">
+        <div className="flex flex-col items-center justify-between gap-3 sm:flex-row">
+
+          {/* =================================================
+              BRAND
+          ================================================= */}
+
+          <div className="flex items-center gap-3">
             <div className="flex items-center gap-2">
-              <Heart className="w-4 h-4 text-red-600" fill="currentColor" />
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-red-600">
+                <Activity
+                  className="h-3.5 w-3.5 text-white"
+                  strokeWidth={2.5}
+                />
+              </div>
+
               <span className="text-sm font-semibold text-zinc-900 dark:text-white">
                 RedPulse
               </span>
             </div>
-            <span className="text-xs text-zinc-400 dark:text-zinc-500">
-              © {new Date().getFullYear()} All rights reserved
+
+            <span className="hidden h-4 w-px bg-zinc-300 dark:bg-zinc-700 sm:block" />
+
+            <span className="text-xs text-zinc-500 dark:text-zinc-400">
+              © {new Date().getFullYear()} RedPulse
             </span>
           </div>
 
-          {/* Center Section - Info */}
-          <div className="flex items-center gap-4 text-xs text-zinc-500 dark:text-zinc-400">
-            <span>v1.0.0</span>
-            <span className="w-px h-4 bg-zinc-300 dark:bg-zinc-700"></span>
-            <span>Blood Donor Registry System</span>
-            <span className="w-px h-4 bg-zinc-300 dark:bg-zinc-700"></span>
-            <span>Group F4 Matiks</span>
-          </div>
+          {/* =================================================
+              RIGHT
+          ================================================= */}
 
-          {/* Right Section - Actions */}
           <div className="flex items-center gap-3">
-            {/* Social Links */}
-            <div className="flex items-center gap-1">
-              <a
-                href="https://github.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                aria-label="GitHub"
-              >
-               
-              </a>
-            </div>
+            <span className="text-xs text-zinc-500 dark:text-zinc-400">
+              Blood. Community. Life.
+            </span>
 
-            <span className="w-px h-6 bg-zinc-300 dark:bg-zinc-700"></span>
-
-            {/* Back to Top Button */}
-            <button
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={scrollToTop}
-              className="p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800"
+              className="h-8 w-8 rounded-lg"
               aria-label="Back to top"
+              title="Back to top"
             >
-              <ArrowUp className="w-4 h-4" />
-            </button>
+              <ArrowUp className="h-4 w-4" />
+            </Button>
           </div>
         </div>
       </div>

@@ -57,19 +57,13 @@ interface DonorProfile {
 interface DonorNavbarProps {
   onMenuClick: () => void;
   onProfileClick?: () => void;
-  unreadCount?: number;
-  notifications?: any[];
-  onMarkAsRead?: (id: string) => void;
-  onMarkAllAsRead?: () => void;
+  isMobile?: boolean;
 }
 
-export function DonorNavbar({ 
-  onMenuClick, 
+export function DonorNavbar({
+  onMenuClick,
   onProfileClick,
-  unreadCount = 0,
-  notifications = [],
-  onMarkAsRead,
-  onMarkAllAsRead
+  isMobile = false,
 }: DonorNavbarProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -83,8 +77,37 @@ export function DonorNavbar({
   const [userRole, setUserRole] = useState("donor");
   const [profile, setProfile] = useState<DonorProfile | null>(null);
   const [loadingProfile, setLoadingProfile] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
+  // Notification state
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  // Fetch notifications function
+  const fetchNotifications = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+
+      const response = await fetch('/api/user/donors/notifications', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setNotifications(data.data || []);
+        setUnreadCount(data.unreadCount || 0);
+      }
+    } catch (error) {
+      console.error('Error fetching notifications:', error);
+    }
+  };
+
+  // Load theme and user data on mount
   useEffect(() => {
+    setMounted(true);
     const user = localStorage.getItem('user');
     if (user) {
       try {
@@ -98,18 +121,91 @@ export function DonorNavbar({
       }
     }
 
-    const darkMode = localStorage.getItem('darkMode') === 'true';
-    setIsDarkMode(darkMode);
-    if (darkMode) {
+    // Load dark mode from localStorage
+    const savedTheme = localStorage.getItem('redpulse-theme');
+    const isDark = savedTheme === 'dark';
+    setIsDarkMode(isDark);
+    if (isDark) {
       document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
     }
+
+    // Fetch notifications on mount
+    fetchNotifications();
+
+    // Set up auto-refresh every 30 seconds
+    const interval = setInterval(() => {
+      fetchNotifications();
+    }, 30000);
+
+    // Listen for notification update events
+    const handleNotificationUpdate = () => {
+      fetchNotifications();
+    };
+    window.addEventListener('notificationUpdate', handleNotificationUpdate);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('notificationUpdate', handleNotificationUpdate);
+    };
   }, []);
+
+  const handleMarkAsRead = async (id: string) => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`/api/user/donors/notifications/${id}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.ok) {
+        setNotifications(prev =>
+          prev.map(n => n._id === id ? { ...n, isRead: true } : n)
+        );
+        setUnreadCount(prev => Math.max(0, prev - 1));
+      }
+    } catch (error) {
+      console.error('Error marking notification as read:', error);
+    }
+  };
+
+  const handleMarkAllAsRead = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch('/api/user/donors/notifications', {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.ok) {
+        setNotifications(prev =>
+          prev.map(n => ({ ...n, isRead: true }))
+        );
+        setUnreadCount(0);
+      }
+    } catch (error) {
+      console.error('Error marking all as read:', error);
+    }
+  };
+
+  const handleBellClick = () => {
+    if (!isNotificationsOpen) {
+      // Refresh notifications when opening
+      fetchNotifications();
+    }
+    setIsNotificationsOpen(!isNotificationsOpen);
+  };
 
   const loadProfileData = async (userData: any) => {
     try {
       setLoadingProfile(true);
       const token = localStorage.getItem('token');
-      
+
       let response = await fetch(`/api/donors/${userData.id || userData.userId}`, {
         headers: {
           'Authorization': `Bearer ${token}`
@@ -127,7 +223,7 @@ export function DonorNavbar({
       if (response.ok) {
         const data = await response.json();
         let donorData = data.data || data;
-        
+
         const profileData: DonorProfile = {
           id: donorData._id || donorData.id || donorData.userId || userData.id || 'unknown',
           _id: donorData._id || donorData.id || donorData.userId || 'unknown',
@@ -158,7 +254,7 @@ export function DonorNavbar({
           emergencyName: donorData.emergencyName || userData.emergencyName || '',
           emergencyRelationship: donorData.emergencyRelationship || userData.emergencyRelationship || ''
         };
-        
+
         setProfile(profileData);
       } else {
         // Fallback to localStorage data
@@ -206,11 +302,24 @@ export function DonorNavbar({
     return path.charAt(0).toUpperCase() + path.slice(1);
   };
 
+  // Proper dark mode toggle that saves to localStorage
   const toggleDarkMode = () => {
     const newDarkMode = !isDarkMode;
     setIsDarkMode(newDarkMode);
+
+    // Save to localStorage with consistent key
+    localStorage.setItem('redpulse-theme', newDarkMode ? 'dark' : 'light');
     localStorage.setItem('darkMode', String(newDarkMode));
-    document.documentElement.classList.toggle('dark');
+
+    // Toggle dark class on html element
+    if (newDarkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+
+    // Dispatch event for other components
+    document.dispatchEvent(new Event('themechange'));
   };
 
   const handleLogout = () => {
@@ -218,13 +327,13 @@ export function DonorNavbar({
     localStorage.removeItem('user');
     localStorage.removeItem('userData');
     sessionStorage.clear();
-    
+
     document.cookie.split(';').forEach((c) => {
       document.cookie = c
         .replace(/^ +/, '')
         .replace(/=.*/, '=;expires=' + new Date().toUTCString() + ';path=/');
     });
-    
+
     window.location.href = '/';
   };
 
@@ -238,7 +347,7 @@ export function DonorNavbar({
   };
 
   const getRoleLabel = () => {
-    switch(userRole) {
+    switch (userRole) {
       case 'admin': return 'Administrator';
       case 'hospital': return 'Hospital Admin';
       case 'donor': return 'Blood Donor';
@@ -247,7 +356,7 @@ export function DonorNavbar({
   };
 
   const getDashboardRoute = () => {
-    switch(userRole) {
+    switch (userRole) {
       case 'admin': return '/admin/dashboard';
       case 'hospital': return '/hospital/dashboard';
       case 'donor': return '/donors/dashboard';
@@ -333,7 +442,7 @@ export function DonorNavbar({
   // Convert DonorProfile to DigitalIDCard format
   const getDigitalIDData = () => {
     if (!profile) return null;
-    
+
     return {
       id: profile.id,
       name: profile.fullName,
@@ -352,8 +461,8 @@ export function DonorNavbar({
       province: profile.province,
       emergencyContact: profile.emergencyContact,
       totalDonations: profile.totalDonations || 0,
-      nextEligible: profile.lastDonationDate ? 
-        new Date(new Date(profile.lastDonationDate).setMonth(new Date(profile.lastDonationDate).getMonth() + 3)).toISOString() : 
+      nextEligible: profile.lastDonationDate ?
+        new Date(new Date(profile.lastDonationDate).setMonth(new Date(profile.lastDonationDate).getMonth() + 3)).toISOString() :
         new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString(),
       address: profile.address,
       civilStatus: 'Single',
@@ -362,7 +471,6 @@ export function DonorNavbar({
   };
 
   const handleDownloadID = () => {
-    // Trigger download via the DigitalIDCard component
     const printWindow = window.open('', '_blank');
     if (printWindow) {
       const idCardElement = document.getElementById('digital-id-card-print');
@@ -387,35 +495,47 @@ export function DonorNavbar({
     }
   };
 
+  // Prevent hydration mismatch
+  if (!mounted) {
+    return (
+      <header className="sticky top-0 z-20 bg-white/80 dark:bg-black/80 backdrop-blur-lg border-b border-zinc-200/60 dark:border-zinc-800/60">
+        <div className="flex items-center justify-between px-3 sm:px-6 py-2.5 sm:py-4">
+          <div className="flex items-center gap-2 sm:gap-4">
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <div className="w-6 h-6 sm:w-7 sm:h-7 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse" />
+              <div className="w-16 h-4 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse" />
+            </div>
+          </div>
+          <div className="flex items-center gap-1 sm:gap-3">
+            <div className="w-20 h-8 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse hidden md:block" />
+            <div className="w-8 h-8 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse" />
+            <div className="w-8 h-8 bg-zinc-200 dark:bg-zinc-700 rounded animate-pulse" />
+            <div className="w-8 h-8 bg-zinc-200 dark:bg-zinc-700 rounded-full animate-pulse" />
+          </div>
+        </div>
+      </header>
+    );
+  }
+
   return (
     <>
       <header className="sticky top-0 z-20 bg-white/80 dark:bg-black/80 backdrop-blur-lg border-b border-zinc-200/60 dark:border-zinc-800/60">
-        <div className="flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4">
-          <div className="flex items-center gap-3 sm:gap-4">
-            <button
-              onClick={onMenuClick}
-              className="lg:hidden p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition"
-              aria-label="Toggle sidebar"
-            >
-              <Menu className="w-5 h-5 text-zinc-600 dark:text-zinc-400" />
-            </button>
+        <div className="flex items-center justify-between px-3 sm:px-6 py-2.5 sm:py-4">
+          <div className="flex items-center gap-2 sm:gap-4">
+            {/* REMOVED: Hamburger menu button - not needed on mobile or desktop */}
             
-            <div className="flex items-center gap-2">
-              <Link href={getDashboardRoute()} className="flex items-center gap-2">
-                <div className="bg-red-600 p-1.5 rounded-lg shadow-lg shadow-red-200 dark:shadow-red-900/30">
-                  <Heart className="w-4 h-4 text-white" fill="currentColor" />
-                </div>
-                <span className="text-sm font-bold text-zinc-900 dark:text-white hidden sm:block">
-                  RedPulse
-                </span>
-              </Link>
-              <h2 className="text-lg sm:text-xl font-semibold text-zinc-900 dark:text-white hidden sm:block">
-                {getPageTitle()}
-              </h2>
-            </div>
+            <Link href={getDashboardRoute()} className="flex items-center gap-1.5 sm:gap-2">
+              <div className="bg-red-600 p-1.5 rounded-lg shadow-lg shadow-red-200 dark:shadow-red-900/30">
+                <Heart className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-white" fill="currentColor" />
+              </div>
+              <span className="text-sm sm:text-base font-bold text-zinc-900 dark:text-white">
+                RedPulse
+              </span>
+            </Link>
           </div>
 
           <div className="flex items-center gap-1 sm:gap-3">
+            {/* Search - Hidden on mobile */}
             <div className="hidden md:flex items-center gap-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-1.5">
               <Search className="w-4 h-4 text-zinc-400" />
               <input
@@ -428,28 +548,29 @@ export function DonorNavbar({
               </kbd>
             </div>
 
+            {/* Dark Mode Toggle */}
             <button
               onClick={toggleDarkMode}
-              className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition"
+              className="p-1.5 sm:p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition"
               aria-label="Toggle dark mode"
             >
               {isDarkMode ? (
-                <Sun className="w-5 h-5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300" />
+                <Sun className="w-4 h-4 sm:w-5 sm:h-5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300" />
               ) : (
-                <Moon className="w-5 h-5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300" />
+                <Moon className="w-4 h-4 sm:w-5 sm:h-5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300" />
               )}
             </button>
 
             <div className="relative">
               <button
-                onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
-                className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition relative"
+                onClick={handleBellClick}
+                className="p-1.5 sm:p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition relative"
                 aria-label="Notifications"
               >
-                <Bell className="w-5 h-5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300" />
+                <Bell className="w-4 h-4 sm:w-5 sm:h-5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300" />
                 {unreadCount > 0 && (
-                  <span className="absolute -top-0.5 -right-0.5 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center font-bold ring-2 ring-white dark:ring-black">
-                    {unreadCount}
+                  <span className="absolute -top-0.5 -right-0.5 w-4 h-4 sm:w-5 sm:h-5 bg-red-500 text-white text-[8px] sm:text-xs rounded-full flex items-center justify-center font-bold ring-2 ring-white dark:ring-black">
+                    {unreadCount > 99 ? '99+' : unreadCount}
                   </span>
                 )}
               </button>
@@ -458,10 +579,10 @@ export function DonorNavbar({
             <div className="relative">
               <button
                 onClick={() => setIsProfileOpen(!isProfileOpen)}
-                className="flex items-center gap-2 p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition group"
+                className="flex items-center gap-1.5 sm:gap-2 p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition group"
                 aria-label="Profile"
               >
-                <div className="w-8 h-8 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center text-red-600 dark:text-red-400 font-semibold text-sm">
+                <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center text-red-600 dark:text-red-400 font-semibold text-xs sm:text-sm">
                   {getUserInitials()}
                 </div>
                 <div className="hidden md:block text-left">
@@ -472,7 +593,7 @@ export function DonorNavbar({
                     {getRoleLabel()}
                   </p>
                 </div>
-                <ChevronDown className="hidden md:block w-4 h-4 text-zinc-400 group-hover:text-zinc-600 dark:group-hover:text-zinc-300 transition" />
+                <ChevronDown className="hidden md:block w-3.5 h-3.5 sm:w-4 sm:h-4 text-zinc-400 group-hover:text-zinc-600 dark:group-hover:text-zinc-300 transition" />
               </button>
 
               {isProfileOpen && (
@@ -502,11 +623,9 @@ export function DonorNavbar({
                         <UserCircle className="w-4 h-4" />
                         My Profile
                       </button>
-
-
                       <Link
                         href="/donors/settings"
-                        className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition"
+                        className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition w-full"
                         onClick={() => setIsProfileOpen(false)}
                       >
                         <Settings className="w-4 h-4" />
@@ -515,7 +634,7 @@ export function DonorNavbar({
 
                       <Link
                         href="/help"
-                        className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition"
+                        className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition w-full"
                         onClick={() => setIsProfileOpen(false)}
                       >
                         <HelpCircle className="w-4 h-4" />
@@ -540,13 +659,15 @@ export function DonorNavbar({
         </div>
       </header>
 
+      {/* Notification Modal */}
       <NotificationModal
         isOpen={isNotificationsOpen}
         onClose={() => setIsNotificationsOpen(false)}
         notifications={notifications}
         unreadCount={unreadCount}
-        onMarkAsRead={onMarkAsRead || (() => {})}
-        onMarkAllAsRead={onMarkAllAsRead || (() => {})}
+        onMarkAsRead={handleMarkAsRead}
+        onMarkAllAsRead={handleMarkAllAsRead}
+        onRefresh={fetchNotifications}
       />
 
       {/* Profile Modal */}

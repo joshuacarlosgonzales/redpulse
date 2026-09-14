@@ -1,164 +1,381 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { dbConnect } from '@/lib/db';
-import BloodDrive from '@/models/BloodDrive';
-import BloodDriveRegistration from '@/models/BloodDriveRegistration'; // ✅ Import this
-import User from '@/models/User';
-import jwt from 'jsonwebtoken';
-import mongoose from 'mongoose';
+import {
+  NextRequest,
+  NextResponse,
+} from 'next/server'
 
-const BloodDriveRegistrationModel = BloodDriveRegistration as any;
+import { dbConnect } from '@/lib/db'
+
+import BloodDrive from '@/models/BloodDrive'
+import BloodDriveRegistration from '@/models/BloodDriveRegistration'
+import User from '@/models/User'
+
+import jwt from 'jsonwebtoken'
+import mongoose from 'mongoose'
+
+const BloodDriveRegistrationModel =
+  BloodDriveRegistration as any
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  {
+    params,
+  }: {
+    params: Promise<{ id: string }>
+  }
 ) {
   try {
-    await dbConnect();
+    await dbConnect()
 
-    const authHeader = request.headers.get('Authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return NextResponse.json({
-        success: false,
-        error: 'Unauthorized - No token provided'
-      }, { status: 401 });
-    }
+    // ============================================================
+    // AUTHENTICATION
+    // ============================================================
 
-    const token = authHeader.split(' ')[1];
-    
-    let decoded: any;
-    try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret') as {
-        userId: string;
-        role: string;
-      };
-      
-      if (decoded.role !== 'donor' && decoded.role !== 'user' && decoded.role !== 'admin') {
-        return NextResponse.json({
+    const authHeader =
+      request.headers.get('authorization')
+
+    if (
+      !authHeader ||
+      !authHeader.startsWith('Bearer ')
+    ) {
+      return NextResponse.json(
+        {
           success: false,
-          error: 'Unauthorized - Only donors can register for blood drives'
-        }, { status: 403 });
+          error:
+            'Unauthorized - No token provided',
+        },
+        { status: 401 }
+      )
+    }
+
+    const token =
+      authHeader.split(' ')[1]
+
+    let decoded: any
+
+    try {
+      decoded = jwt.verify(
+        token,
+        process.env.JWT_SECRET || 'secret'
+      ) as any
+
+      if (
+        decoded.role !== 'donor' &&
+        decoded.role !== 'user' &&
+        decoded.role !== 'admin'
+      ) {
+        return NextResponse.json(
+          {
+            success: false,
+            error:
+              'Unauthorized - Only donors can register for blood drives',
+          },
+          { status: 403 }
+        )
       }
-    } catch (jwtError) {
-      return NextResponse.json({
-        success: false,
-        error: 'Unauthorized - Invalid token'
-      }, { status: 401 });
+    } catch {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            'Unauthorized - Invalid token',
+        },
+        { status: 401 }
+      )
     }
 
-    const { id } = await params;
+    // ============================================================
+    // BLOOD DRIVE ID
+    // ============================================================
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return NextResponse.json({
-        success: false,
-        error: 'Invalid blood drive ID'
-      }, { status: 400 });
+    const { id } = await params
+
+    if (
+      !mongoose.Types.ObjectId.isValid(id)
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            'Invalid blood drive ID',
+        },
+        { status: 400 }
+      )
     }
 
-    const bloodDrive = await BloodDrive.findById(id);
+    // ============================================================
+    // FIND BLOOD DRIVE
+    // ============================================================
+
+    const bloodDrive =
+      await BloodDrive.findById(id)
+
     if (!bloodDrive) {
-      return NextResponse.json({
-        success: false,
-        error: 'Blood drive not found'
-      }, { status: 404 });
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            'Blood drive not found',
+        },
+        { status: 404 }
+      )
     }
 
-    if (bloodDrive.status === 'cancelled' || bloodDrive.status === 'completed') {
-      return NextResponse.json({
-        success: false,
-        error: `This blood drive is ${bloodDrive.status}. Registration is closed.`
-      }, { status: 400 });
+    // ============================================================
+    // CHECK STATUS
+    // ============================================================
+
+    if (
+      bloodDrive.status ===
+        'cancelled' ||
+      bloodDrive.status ===
+        'completed'
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `This blood drive is ${bloodDrive.status}. Registration is closed.`,
+        },
+        { status: 400 }
+      )
     }
 
-    if (new Date(bloodDrive.date) < new Date() && bloodDrive.status !== 'ongoing') {
-      return NextResponse.json({
-        success: false,
-        error: 'This blood drive has already passed'
-      }, { status: 400 });
+    // ============================================================
+    // CHECK DATE
+    // ============================================================
+
+    if (
+      new Date(
+        bloodDrive.date
+      ) < new Date() &&
+      bloodDrive.status !==
+        'ongoing'
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            'This blood drive has already passed',
+        },
+        { status: 400 }
+      )
     }
 
-    const donorId = decoded.userId;
-    
-    // ✅ Check if already registered in BloodDriveRegistration
-    const existingRegistration = await BloodDriveRegistrationModel.findOne({
-      donorId: donorId,
-      bloodDriveId: id
-    });
+    // ============================================================
+    // DONOR ID
+    // ============================================================
+
+    const donorId =
+      decoded.userId
+
+    if (!donorId) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            'Donor ID not found in token',
+        },
+        { status: 400 }
+      )
+    }
+
+    // ============================================================
+    // CHECK EXISTING REGISTRATION
+    // ============================================================
+
+    const existingRegistration =
+      await BloodDriveRegistrationModel.findOne(
+        {
+          donorId,
+          bloodDriveId: id,
+        }
+      )
 
     if (existingRegistration) {
-      return NextResponse.json({
-        success: false,
-        error: 'You are already registered for this blood drive'
-      }, { status: 400 });
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            'You are already registered for this blood drive',
+        },
+        { status: 400 }
+      )
     }
 
-    // ✅ Check if already registered in BloodDrive registeredDonorIds
-    if (bloodDrive.registeredDonorIds && bloodDrive.registeredDonorIds.length > 0) {
-      const isRegistered = bloodDrive.registeredDonorIds.some(
-        (did: any) => did.toString() === donorId
-      );
-      
+    // ============================================================
+    // CHECK BLOOD DRIVE ARRAY
+    // ============================================================
+
+    if (
+      bloodDrive.registeredDonorIds &&
+      bloodDrive.registeredDonorIds.length >
+        0
+    ) {
+      const isRegistered =
+        bloodDrive.registeredDonorIds.some(
+          (did: any) =>
+            did.toString() ===
+            donorId.toString()
+        )
+
       if (isRegistered) {
-        return NextResponse.json({
-          success: false,
-          error: 'You are already registered for this blood drive'
-        }, { status: 400 });
+        return NextResponse.json(
+          {
+            success: false,
+            error:
+              'You are already registered for this blood drive',
+          },
+          { status: 400 }
+        )
       }
     }
 
-    // ✅ Create BloodDriveRegistration record
-    const registration = new BloodDriveRegistrationModel({
-      donorId: donorId,
-      bloodDriveId: id,
-      status: 'registered',
-      registeredAt: new Date(),
-      notes: 'Registered via donor portal'
-    });
+    // ============================================================
+    // CREATE REGISTRATION
+    // ============================================================
 
-    await registration.save();
-    console.log('✅ BloodDriveRegistration created:', registration._id);
+    const registration =
+      new BloodDriveRegistrationModel({
+        donorId,
 
-    // ✅ Add donor to registeredDonorIds in BloodDrive
-    if (!bloodDrive.registeredDonorIds) {
-      bloodDrive.registeredDonorIds = [];
+        bloodDriveId: id,
+
+        status: 'registered',
+
+        // ✅ ADDED
+        donationStatus: 'pending',
+
+        registeredAt:
+          new Date(),
+
+        notes:
+          'Registered via donor portal',
+      })
+
+    await registration.save()
+
+    console.log(
+      '✅ BloodDriveRegistration created:',
+      registration._id
+    )
+
+    // ============================================================
+    // ADD DONOR TO BLOOD DRIVE
+    // ============================================================
+
+    if (
+      !bloodDrive.registeredDonorIds
+    ) {
+      bloodDrive.registeredDonorIds =
+        []
     }
-    bloodDrive.registeredDonorIds.push(new mongoose.Types.ObjectId(donorId));
-    bloodDrive.registeredDonors = (bloodDrive.registeredDonors || 0) + 1;
-    
-    // ✅ Set donor status to 'pending'
+
+    bloodDrive.registeredDonorIds.push(
+      new mongoose.Types.ObjectId(
+        donorId
+      )
+    )
+
+    bloodDrive.registeredDonors =
+      (
+        bloodDrive.registeredDonors ||
+        0
+      ) + 1
+
+    // ============================================================
+    // DONOR STATUS
+    // ============================================================
+
     if (!bloodDrive.donorStatuses) {
-      bloodDrive.donorStatuses = new Map();
+      bloodDrive.donorStatuses =
+        new Map()
     }
-    bloodDrive.donorStatuses.set(donorId, 'pending');
-    
-    await bloodDrive.save();
-    console.log('✅ Blood drive updated with new registrant');
 
-    // Get donor info for response
-    const donor = await User.findById(donorId).select('fullName email phone');
+    bloodDrive.donorStatuses.set(
+      donorId.toString(),
+      'pending'
+    )
+
+    await bloodDrive.save()
+
+    console.log(
+      '✅ Blood drive updated with new registrant'
+    )
+
+    // ============================================================
+    // DONOR INFORMATION
+    // ============================================================
+
+    const donor =
+      await User.findById(
+        donorId
+      ).select(
+        'fullName email phone'
+      )
+
+    // ============================================================
+    // RESPONSE
+    // ============================================================
 
     return NextResponse.json({
       success: true,
-      message: 'Successfully registered for blood drive! 🎉',
-      data: {
-        registrationId: registration._id.toString(),
-        bloodDriveId: bloodDrive._id.toString(),
-        title: bloodDrive.title,
-        date: bloodDrive.date,
-        location: bloodDrive.location,
-        registeredDonors: bloodDrive.registeredDonors,
-        donorName: donor?.fullName || 'Unknown',
-        donorEmail: donor?.email || '',
-        donorPhone: donor?.phone || '',
-        status: 'registered',
-        registeredAt: registration.registeredAt
-      }
-    });
 
+      message:
+        'Successfully registered for blood drive! 🎉',
+
+      data: {
+        registrationId:
+          registration._id.toString(),
+
+        bloodDriveId:
+          bloodDrive._id.toString(),
+
+        title:
+          bloodDrive.title,
+
+        date:
+          bloodDrive.date,
+
+        location:
+          bloodDrive.location,
+
+        registeredDonors:
+          bloodDrive.registeredDonors,
+
+        donorName:
+          donor?.fullName ||
+          'Unknown',
+
+        donorEmail:
+          donor?.email || '',
+
+        donorPhone:
+          donor?.phone || '',
+
+        status:
+          'registered',
+
+        // ✅ ADDED
+        donationStatus:
+          'pending',
+
+        registeredAt:
+          registration.registeredAt,
+      },
+    })
   } catch (error: any) {
-    console.error('❌ Error registering for blood drive:', error);
-    return NextResponse.json({
-      success: false,
-      error: error.message || 'Failed to register for blood drive'
-    }, { status: 500 });
+    console.error(
+      '❌ Error registering for blood drive:',
+      error
+    )
+
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          error.message ||
+          'Failed to register for blood drive',
+      },
+      { status: 500 }
+    )
   }
 }

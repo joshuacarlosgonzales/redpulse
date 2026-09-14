@@ -136,6 +136,7 @@ export default function PendingRequestsPage() {
     }
   }, [searchQuery, urgencyFilter, router]);
 
+  // ✅ FIXED: Added fetchRequests to dependency array
   useEffect(() => {
     fetchRequests();
   }, [fetchRequests]);
@@ -147,6 +148,7 @@ export default function PendingRequestsPage() {
     showToast('success', 'Requests refreshed!');
   };
 
+  // ✅ handleApprove - sends 'approved' status (correct)
   const handleApprove = async (id: string) => {
     try {
       setProcessingId(id);
@@ -158,7 +160,7 @@ export default function PendingRequestsPage() {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ status: 'approved' })
+        body: JSON.stringify({ status: 'approved' }) // ✅ Correct status
       });
 
       const data = await response.json();
@@ -179,6 +181,7 @@ export default function PendingRequestsPage() {
     }
   };
 
+  // ✅ handleReject - sends 'rejected' status (correct)
   const handleReject = async (id: string) => {
     try {
       setProcessingId(id);
@@ -191,7 +194,7 @@ export default function PendingRequestsPage() {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({ 
-          status: 'rejected',
+          status: 'rejected', // ✅ Correct status
           rejectionReason: rejectionReason || 'Request rejected by hospital'
         })
       });

@@ -1,37 +1,82 @@
 "use client";
 
-import { useState } from "react";
 import { Sidebar } from "@/components/layouts/Sidebar";
 import { Navbar } from "@/components/layouts/Navbar";
 import { Footer } from "@/components/layouts/Footer";
+import {
+  SidebarProvider,
+  useSidebar,
+} from "@/components/ui/sidebar";
 
 interface AdminLayoutProps {
   children: React.ReactNode;
 }
 
-export default function AdminLayout({ children }: AdminLayoutProps) {
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+/* =========================================================
+   ADMIN CONTENT
+   This component must be inside SidebarProvider so that
+   useSidebar() can control the real sidebar.
+========================================================= */
+
+function AdminLayoutContent({
+  children,
+}: AdminLayoutProps) {
+  const { toggleSidebar } = useSidebar();
 
   return (
-    <div className="flex h-screen bg-zinc-50 dark:bg-black overflow-hidden">
-      {/* Sidebar */}
-      <Sidebar isOpen={isSidebarOpen} setIsOpen={setIsSidebarOpen} />
+    <div className="flex h-screen w-full overflow-hidden bg-zinc-50 dark:bg-black">
+      {/* =====================================================
+          SIDEBAR
+      ===================================================== */}
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Navbar */}
-        <Navbar onMenuClick={() => setIsSidebarOpen(true)} />
+      <Sidebar />
 
-        {/* Page Content */}
-        <main className="flex-1 overflow-y-auto">
-          <div className="p-6">
+      {/* =====================================================
+          MAIN AREA
+      ===================================================== */}
+
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        {/* ===================================================
+            NAVBAR
+
+            Pass toggleSidebar to Navbar so the hamburger
+            button controls the actual SidebarProvider.
+        =================================================== */}
+
+        <Navbar onMenuClick={toggleSidebar} />
+
+        {/* ===================================================
+            PAGE CONTENT
+        =================================================== */}
+
+        <main className="min-h-0 flex-1 overflow-y-auto">
+          <div className="p-4 sm:p-5 lg:p-6">
             {children}
           </div>
         </main>
 
-        {/* Footer */}
+        {/* ===================================================
+            FOOTER
+        =================================================== */}
+
         <Footer />
       </div>
     </div>
+  );
+}
+
+/* =========================================================
+   ADMIN LAYOUT
+========================================================= */
+
+export default function AdminLayout({
+  children,
+}: AdminLayoutProps) {
+  return (
+    <SidebarProvider defaultOpen={true}>
+      <AdminLayoutContent>
+        {children}
+      </AdminLayoutContent>
+    </SidebarProvider>
   );
 }

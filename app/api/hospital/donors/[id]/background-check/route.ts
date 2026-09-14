@@ -1,66 +1,61 @@
 // app/api/hospital/donors/[id]/background-check/route.ts
+
 import { NextRequest, NextResponse } from 'next/server'
+
 import dbConnect from '@/lib/mongodb'
 import Donor from '@/models/Donor'
 import User from '@/models/User'
-import jwt from 'jsonwebtoken'
+import Donation from '@/models/Donation'
+
+import {
+  getAuthenticatedHospitalUser,
+  getUserIdFromAuth,
+  isAuthFailure,
+} from '@/lib/hospitalAuth'
 import mongoose from 'mongoose'
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  {
+    params,
+  }: {
+    params: Promise<{ id: string }>
+  }
 ) {
   try {
     await dbConnect()
 
-    const authHeader = request.headers.get('authorization')
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return NextResponse.json(
-        { error: 'Unauthorized - No token provided' },
-        { status: 401 }
-      )
+    // ============================================================
+    // AUTHENTICATION - Using helper consistently
+    // ============================================================
+
+    const auth = getAuthenticatedHospitalUser(request)
+
+    if (isAuthFailure(auth)) {
+      return auth.response
     }
 
-    const token = authHeader.split(' ')[1]
-    
-    let decoded: any;
-    
-    try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret') as any
-      if (!decoded) {
-        return NextResponse.json(
-          { error: 'Unauthorized - Invalid token' },
-          { status: 401 }
-        )
-      }
-      
-      if (decoded.role !== 'hospital' && decoded.role !== 'admin') {
-        return NextResponse.json(
-          { error: 'Unauthorized - Hospital or Admin access required' },
-          { status: 403 }
-        )
-      }
-    } catch (jwtError) {
-      return NextResponse.json(
-        { error: 'Unauthorized - Invalid token' },
-        { status: 401 }
-      )
-    }
+    const decoded = auth.user
+
+    // ============================================================
+    // PARAMETER
+    // ============================================================
 
     const { id } = await params
-    const { status, notes } = await request.json()
 
-    if (!status) {
+    const body = await request.json()
+    const { status: bgStatus, notes } = body
+
+    if (!bgStatus) {
       return NextResponse.json(
         { error: 'Background check status is required' },
         { status: 400 }
       )
     }
 
-    const validStatuses = ['pending', 'in-review', 'cleared', 'failed']
-    if (!validStatuses.includes(status)) {
+    if (!['pending', 'cleared', 'failed', 'in-review'].includes(bgStatus)) {
       return NextResponse.json(
-        { error: 'Invalid status. Must be: pending, in-review, cleared, or failed' },
+        { error: 'Invalid status. Must be "pending", "cleared", "failed", or "in-review"' },
         { status: 400 }
       )
     }
@@ -72,7 +67,12 @@ export async function POST(
       )
     }
 
+    // ============================================================
+    // FIND DONOR
+    // ============================================================
+
     const donor = await Donor.findById(id)
+
     if (!donor) {
       return NextResponse.json(
         { error: 'Donor not found' },
@@ -80,19 +80,124 @@ export async function POST(
       )
     }
 
-    donor.backgroundCheckStatus = status
+    // ============================================================
+    // 🔴 FIXED: HOSPITAL OWNERSHIP CHECK
+    // ============================================================
+
+    if (decoded.role === 'hospital') {
+      const hospitalId = getUserIdFromAuth(decoded)
+
+      if (!hospitalId) {
+        console.error('❌ Hospital ID not found in token')
+        return NextResponse.json(
+          { error: 'Invalid hospital authentication' },
+          { status: 401 }
+        )
+      }
+
+      const hospitalObjectId = new mongoose.Types.ObjectId(hospitalId)
+
+      // Get hospital email for walk-in donor check
+      const hospitalUser = await User.findById(hospitalId)
+        .select('email')
+        .lean()
+      const hospitalEmail = hospitalUser?.email || decoded.email
+
+      // Check if this hospital has access to this donor
+      let hasAccess = false
+
+      // 1. Check if donor has completed donation at this hospital
+      const hasDonation = await Donation.exists({
+        donorId: donor._id,
+        hospitalId: hospitalObjectId,
+        status: 'Completed'
+      })
+
+      if (hasDonation) {
+        hasAccess = true
+      }
+
+      // 2. Check if this is a walk-in donor created by this hospital
+      if (donor.isWalkIn && donor.approvedBy === hospitalEmail) {
+        hasAccess = true
+      }
+
+      // 3. Check if donor is registered for a blood drive at this hospital
+      if (!hasAccess) {
+        const BloodDriveRegistration = (await import('@/models/BloodDriveRegistration')).default
+        const isRegistered = await BloodDriveRegistration.exists({
+          donorId: donor._id,
+          hospitalId: hospitalObjectId,
+          status: { $in: ['registered', 'attended'] }
+        })
+
+        if (isRegistered) {
+          hasAccess = true
+        }
+      }
+
+      if (!hasAccess) {
+        console.warn(`🔒 Hospital ${hospitalEmail} attempted to access donor ${donor._id} without permission`)
+        return NextResponse.json(
+          { error: 'Access denied - donor does not belong to your hospital' },
+          { status: 403 }
+        )
+      }
+
+      console.log(`✅ Hospital ${hospitalEmail} verified for donor ${donor._id}`)
+    }
+
+    // ============================================================
+    // UPDATE BACKGROUND CHECK
+    // ============================================================
+
+    // ✅ FIX: Store verifiedBy as email for consistency
+    if (decoded.role === 'hospital') {
+      const hospitalId = getUserIdFromAuth(decoded)
+      const hospitalUser = await User.findById(hospitalId)
+        .select('email')
+        .lean()
+      donor.verifiedBy = hospitalUser?.email || decoded.email
+    } else {
+      donor.verifiedBy = decoded.email || decoded.userId || decoded.id
+    }
+
+    donor.backgroundCheckStatus = bgStatus
     donor.backgroundCheckDate = new Date()
-    donor.backgroundCheckNotes = notes || donor.backgroundCheckNotes || ''
-    donor.verifiedBy = decoded.userId
-    donor.verificationDate = new Date()
+
+    if (notes) {
+      donor.backgroundCheckNotes = notes.trim()
+    }
+
+    // If background check is cleared, update donor eligibility
+    if (bgStatus === 'cleared') {
+      donor.isEligible = true
+      // If donor was inactive due to failed check, reactivate
+      if (donor.status === 'inactive' && donor.rejectionReason?.includes('background')) {
+        donor.status = 'active'
+        donor.rejectionReason = undefined
+      }
+    } else if (bgStatus === 'failed') {
+      donor.isEligible = false
+    }
 
     await donor.save()
 
-    const user = await User.findById(decoded.userId).select('fullName')
+    // Update linked User if exists
+    if (donor.userId) {
+      await User.findByIdAndUpdate(donor.userId, {
+        backgroundCheckStatus: bgStatus,
+        backgroundCheckDate: new Date(),
+        ...(bgStatus === 'cleared' ? { isVerified: true } : {}),
+        ...(bgStatus === 'failed' ? { isVerified: false } : {})
+      })
+    }
+
+    console.log(`📋 Background check for ${donor.fullName} updated to: ${bgStatus}`)
 
     return NextResponse.json({
       success: true,
-      message: `Background check updated to ${status}`,
+      message: `Background check status updated to ${bgStatus}`,
       donor: {
         id: donor._id.toString(),
         name: donor.fullName,
@@ -100,106 +205,22 @@ export async function POST(
         backgroundCheckStatus: donor.backgroundCheckStatus,
         backgroundCheckDate: donor.backgroundCheckDate,
         backgroundCheckNotes: donor.backgroundCheckNotes,
-        verifiedBy: user?.fullName || decoded.userId,
+        verifiedBy: donor.verifiedBy,
         verificationDate: donor.verificationDate,
-      }
+        isEligible: donor.isEligible,
+        status: donor.status,
+      },
     })
-
   } catch (error: any) {
     console.error('Error updating background check:', error)
+
     return NextResponse.json(
-      { error: error.message || 'Failed to update background check' },
-      { status: 500 }
-    )
-  }
-}
-
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    await dbConnect()
-
-    const authHeader = request.headers.get('authorization')
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return NextResponse.json(
-        { error: 'Unauthorized - No token provided' },
-        { status: 401 }
-      )
-    }
-
-    const token = authHeader.split(' ')[1]
-    
-    let decoded: any;
-    
-    try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret') as any
-      if (!decoded) {
-        return NextResponse.json(
-          { error: 'Unauthorized - Invalid token' },
-          { status: 401 }
-        )
+      {
+        error: error.message || 'Failed to update background check',
+      },
+      {
+        status: 500,
       }
-      
-      if (decoded.role !== 'hospital' && decoded.role !== 'admin') {
-        return NextResponse.json(
-          { error: 'Unauthorized - Hospital or Admin access required' },
-          { status: 403 }
-        )
-      }
-    } catch (jwtError) {
-      return NextResponse.json(
-        { error: 'Unauthorized - Invalid token' },
-        { status: 401 }
-      )
-    }
-
-    const { id } = await params
-
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return NextResponse.json(
-        { error: 'Invalid donor ID format' },
-        { status: 400 }
-      )
-    }
-
-    const donor = await Donor.findById(id).select(
-      'fullName email backgroundCheckStatus backgroundCheckDate backgroundCheckNotes verifiedBy verificationDate'
-    )
-    
-    if (!donor) {
-      return NextResponse.json(
-        { error: 'Donor not found' },
-        { status: 404 }
-      )
-    }
-
-    let verifierName = null
-    if (donor.verifiedBy) {
-      const verifier = await User.findById(donor.verifiedBy).select('fullName')
-      verifierName = verifier?.fullName || donor.verifiedBy
-    }
-
-    return NextResponse.json({
-      success: true,
-      data: {
-        id: donor._id.toString(),
-        fullName: donor.fullName,
-        email: donor.email,
-        status: donor.backgroundCheckStatus || 'pending',
-        date: donor.backgroundCheckDate || null,
-        notes: donor.backgroundCheckNotes || '',
-        verifiedBy: verifierName || null,
-        verificationDate: donor.verificationDate || null,
-      }
-    })
-
-  } catch (error: any) {
-    console.error('Error fetching background check:', error)
-    return NextResponse.json(
-      { error: error.message || 'Failed to fetch background check' },
-      { status: 500 }
     )
   }
 }

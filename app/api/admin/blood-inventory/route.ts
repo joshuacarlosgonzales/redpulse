@@ -1,409 +1,291 @@
 // app/api/admin/blood-inventory/route.ts
-import { NextRequest, NextResponse } from 'next/server'
-import dbConnect from '@/lib/mongodb'
-import Hospital from '@/models/Hospital'
-import BloodInventory from '@/models/BloodInventory'
-import jwt from 'jsonwebtoken'
-import mongoose from 'mongoose'
+import { NextRequest, NextResponse } from 'next/server';
+import dbConnect from '@/lib/mongodb';
+import BloodInventory from '@/models/BloodInventory';
+import User from '@/models/User';
+import jwt from 'jsonwebtoken';
+import mongoose from 'mongoose';
 
-// Helper function to determine status
-function getBloodStatus(units: number, minRequired: number = 15): string {
-  if (units <= 0) return 'Out of Stock';
-  if (units <= minRequired * 0.3) return 'Critical';
-  if (units <= minRequired) return 'Low';
-  return 'Sufficient';
-}
-
+// ============================================================
+// GET - Fetch all blood inventory across hospitals
+// ============================================================
 export async function GET(request: NextRequest) {
   try {
-    await dbConnect()
+    await dbConnect();
 
-    const authHeader = request.headers.get('authorization')
+    // ---- Auth ----
+    const authHeader = request.headers.get('authorization');
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return NextResponse.json(
         { error: 'Unauthorized - No token provided' },
         { status: 401 }
-      )
+      );
     }
 
-    const token = authHeader.split(' ')[1]
-    
+    const token = authHeader.split(' ')[1];
     let decoded: any;
-    
+
     try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret') as any
-      console.log('👤 User ID:', decoded?.userId, 'Role:', decoded?.role)
-      
-      if (!decoded || (decoded.role !== 'admin' && decoded.role !== 'hospital')) {
+      decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret') as any;
+      if (!decoded || decoded.role !== 'admin') {
         return NextResponse.json(
-          { error: 'Unauthorized - Admin or Hospital access required' },
+          { error: 'Unauthorized - Admin access required' },
           { status: 403 }
-        )
+        );
       }
-    } catch (jwtError) {
-      console.error('JWT Error:', jwtError)
+    } catch {
       return NextResponse.json(
         { error: 'Unauthorized - Invalid token' },
         { status: 401 }
-      )
+      );
     }
 
-    const { searchParams } = new URL(request.url)
-    const hospitalId = searchParams.get('hospitalId')
-    const bloodType = searchParams.get('bloodType')
-    const status = searchParams.get('status')
-    const search = searchParams.get('search') || ''
+    // ---- Filters ----
+    const { searchParams } = new URL(request.url);
+    const hospitalId = searchParams.get('hospitalId');
+    const bloodType = searchParams.get('bloodType');
+    const status = searchParams.get('status');
+    const search = searchParams.get('search');
 
-    // Build filter
-    const filter: any = {}
-    
-    if (decoded.role === 'hospital') {
-      filter.hospitalId = new mongoose.Types.ObjectId(decoded.userId)
-    } else if (hospitalId && mongoose.Types.ObjectId.isValid(hospitalId)) {
-      filter.hospitalId = new mongoose.Types.ObjectId(hospitalId)
+    const filter: any = {};
+
+    if (hospitalId && mongoose.Types.ObjectId.isValid(hospitalId)) {
+      filter.hospitalId = new mongoose.Types.ObjectId(hospitalId);
     }
-    
-    if (bloodType) filter.bloodType = bloodType
-    if (status) filter.status = status
-
-    // Search filter
-    let hospitalIds: string[] = [];
-    if (search) {
-      try {
-        const hospitals = await Hospital.find({
-          $or: [
-            { hospitalName: { $regex: search, $options: 'i' } },
-            { hospitalAddress: { $regex: search, $options: 'i' } }
-          ]
-        }).select('_id').lean()
-        
-        hospitalIds = hospitals.map((h: any) => h._id.toString())
-        
-        if (hospitalIds.length > 0) {
-          filter.hospitalId = { $in: hospitalIds.map(id => new mongoose.Types.ObjectId(id)) }
-        } else {
-          return NextResponse.json({
-            success: true,
-            data: [],
-            stats: {
-              totalHospitals: 0,
-              totalBloodUnits: 0,
-              criticalHospitals: 0,
-              lowStockHospitals: 0,
-              bloodTypeBreakdown: {}
-            }
-          })
-        }
-      } catch (searchError) {
-        console.error('Search error:', searchError)
-      }
+    if (bloodType && bloodType !== 'all') {
+      filter.bloodType = bloodType;
+    }
+    if (status && status !== 'all') {
+      // Map frontend status labels to DB values
+      const statusMap: Record<string, string> = {
+        Sufficient: 'sufficient',
+        Low: 'low',
+        Critical: 'critical',
+        'Out of Stock': 'out of stock',
+      };
+      filter.status = statusMap[status] || status.toLowerCase();
     }
 
-    console.log('Filter:', JSON.stringify(filter, null, 2))
+    // ---- Fetch inventory ----
+    let items = await BloodInventory.find(filter).lean();
 
-    // Fetch inventory items
-    const items = await BloodInventory.find(filter).lean()
-    console.log(`Found ${items.length} inventory items`)
+    // ---- Hospital names ----
+    const hospitalIds = [
+      ...new Set(
+        items
+          .map((item: any) => item.hospitalId?.toString())
+          .filter(Boolean)
+      ),
+    ];
 
-    // Get unique hospital IDs and fetch hospital details
-    const hospitalIdSet = new Set()
-    items.forEach((item: any) => {
-      if (item.hospitalId) {
-        hospitalIdSet.add(item.hospitalId.toString())
-      }
+    const hospitals = await User.find({
+      _id: { $in: hospitalIds },
+      role: 'hospital',
     })
-    
-    // Fetch hospital details for all unique hospital IDs
-    const hospitalMap = new Map()
-    if (hospitalIdSet.size > 0) {
-      const hospitalIdsArray = Array.from(hospitalIdSet)
-      const hospitals = await Hospital.find({
-        _id: { $in: hospitalIdsArray }
-      }).lean()
-      
-      hospitals.forEach((hospital: any) => {
-        hospitalMap.set(hospital._id.toString(), hospital)
-      })
-      console.log(`Found ${hospitals.length} hospitals for mapping`)
-    }
+      .select('hospitalName fullName address phone email status')
+      .lean();
 
-    // Transform data - combine inventory with hospital data
-    const transformedInventory = items.map((item: any) => {
-      const hospital = hospitalMap.get(item.hospitalId?.toString()) || {}
-      
+    const hospitalMap = new Map(
+      hospitals.map((h: any) => [
+        h._id.toString(),
+        {
+          name: h.hospitalName || h.fullName || 'Unknown Hospital',
+          address: h.address || '',
+          phone: h.phone || '',
+          email: h.email || '',
+          status: h.status || 'active',
+        },
+      ])
+    );
+
+    // ---- Enrich + calculate totals ----
+    let totalUnits = 0;
+    const bloodTypeBreakdown: Record<string, number> = {
+      'A+': 0, 'A-': 0, 'B+': 0, 'B-': 0,
+      'AB+': 0, 'AB-': 0, 'O+': 0, 'O-': 0,
+    };
+
+    const enriched = items.map((item: any) => {
+      const units = item.units || 0;
+      totalUnits += units;
+
+      if (bloodTypeBreakdown[item.bloodType] !== undefined) {
+        bloodTypeBreakdown[item.bloodType] += units;
+      }
+
+      const hospital = hospitalMap.get(item.hospitalId?.toString()) || {
+        name: 'Unknown Hospital',
+        address: '',
+        phone: '',
+        email: '',
+        status: 'active',
+      };
+
       return {
         id: item._id.toString(),
         hospitalId: item.hospitalId?.toString() || '',
-        hospitalName: hospital.hospitalName || 'Unknown Hospital',
-        hospitalAddress: hospital.hospitalAddress || 'N/A',
-        hospitalPhone: hospital.hospitalPhone || 'N/A',
-        hospitalEmail: hospital.hospitalEmail || 'N/A',
-        hospitalStatus: hospital.status || 'unknown',
-        bloodType: item.bloodType || 'Unknown',
-        quantity: item.units || 0,
-        minRequired: item.minRequired || 15,
-        maxCapacity: item.maxCapacity || 60,
-        status: item.status || getBloodStatus(item.units || 0, item.minRequired || 15),
-        expirationDate: item.expirationDate || new Date(Date.now() + 42 * 24 * 60 * 60 * 1000),
+        hospitalName: hospital.name,
+        hospitalAddress: hospital.address,
+        hospitalPhone: hospital.phone,
+        hospitalEmail: hospital.email,
+        hospitalStatus: hospital.status,
+        bloodType: item.bloodType,
+        units,                          // ← the actual units
+        quantity: units,                // alias for frontend
+        minRequired: item.minRequired ?? 15,
+        maxCapacity: item.maxCapacity ?? 60,
+        status: item.status,
+        expirationDate: item.expirationDate,
         batchNumber: item.batchNumber || '',
         notes: item.notes || '',
-        lastUpdated: item.updatedAt || item.createdAt || new Date(),
-        createdAt: item.createdAt || new Date(),
-        updatedAt: item.updatedAt || new Date()
-      }
-    })
-
-    // Calculate stats
-    const bloodTypeList = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
-    const bloodTypeBreakdown: { [key: string]: number } = {};
-    
-    bloodTypeList.forEach((type: string) => {
-      bloodTypeBreakdown[type] = 0;
+        createdAt: item.createdAt,
+        updatedAt: item.updatedAt,
+        lastUpdated: item.updatedAt || item.createdAt,
+      };
     });
 
-    let totalHospitals = 0;
-    let totalBloodUnits = 0;
-    let criticalHospitals = 0;
-    let lowStockHospitals = 0;
-    const hospitalSet = new Set();
+    // Optional text search (hospital name or blood type)
+    let finalItems = enriched;
+    if (search) {
+      const q = search.toLowerCase();
+      finalItems = enriched.filter(
+        (item) =>
+          item.hospitalName.toLowerCase().includes(q) ||
+          item.bloodType.toLowerCase().includes(q)
+      );
+    }
 
-    transformedInventory.forEach((item: any) => {
-      if (item.hospitalId) {
-        hospitalSet.add(item.hospitalId);
-      }
-      totalBloodUnits += item.quantity || 0;
-      if (bloodTypeBreakdown[item.bloodType] !== undefined) {
-        bloodTypeBreakdown[item.bloodType] += item.quantity || 0;
-      }
-      
-      const status = item.status || 'Sufficient';
-      if (status === 'Critical') criticalHospitals++;
-      else if (status === 'Low') lowStockHospitals++;
-    });
-    totalHospitals = hospitalSet.size;
+    // Count critical / low hospitals
+    const criticalHospitals = new Set(
+      finalItems
+        .filter((i) => i.status === 'critical' || i.status === 'out of stock')
+        .map((i) => i.hospitalId)
+    ).size;
 
-    const stats = {
-      totalHospitals,
-      totalBloodUnits,
-      criticalHospitals,
-      lowStockHospitals,
-      bloodTypeBreakdown
-    };
-
-    console.log(`📊 Stats: ${totalHospitals} hospitals, ${totalBloodUnits} units`)
+    const lowStockHospitals = new Set(
+      finalItems
+        .filter((i) => i.status === 'low')
+        .map((i) => i.hospitalId)
+    ).size;
 
     return NextResponse.json({
       success: true,
-      data: transformedInventory,
-      stats: stats
-    })
-
-  } catch (error: any) {
-    console.error('Error fetching blood inventory:', error)
-    return NextResponse.json(
-      { 
-        error: error.message || 'Failed to fetch blood inventory',
-        details: error.stack 
+      data: finalItems,                 // flat list – your frontend already handles this
+      stats: {
+        totalHospitals: hospitalIds.length,
+        totalBloodUnits: totalUnits,    // ← grand total across all hospitals
+        criticalHospitals,
+        lowStockHospitals,
+        bloodTypeBreakdown,
       },
+    });
+  } catch (error: any) {
+    console.error('Error fetching blood inventory:', error);
+    return NextResponse.json(
+      { error: error.message || 'Failed to fetch inventory' },
       { status: 500 }
-    )
+    );
   }
 }
 
-export async function PUT(request: NextRequest) {
-  try {
-    await dbConnect()
-
-    const authHeader = request.headers.get('authorization')
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return NextResponse.json(
-        { error: 'Unauthorized - No token provided' },
-        { status: 401 }
-      )
-    }
-
-    const token = authHeader.split(' ')[1]
-    
-    let decoded: any;
-    
-    try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret') as any
-      if (!decoded || (decoded.role !== 'admin' && decoded.role !== 'hospital')) {
-        return NextResponse.json(
-          { error: 'Unauthorized - Admin or Hospital access required' },
-          { status: 403 }
-        )
-      }
-    } catch (jwtError) {
-      return NextResponse.json(
-        { error: 'Unauthorized - Invalid token' },
-        { status: 401 }
-      )
-    }
-
-    const body = await request.json()
-    const { inventoryId, units, minRequired, maxCapacity, notes } = body
-
-    if (!inventoryId) {
-      return NextResponse.json(
-        { error: 'Inventory ID is required' },
-        { status: 400 }
-      )
-    }
-
-    if (!mongoose.Types.ObjectId.isValid(inventoryId)) {
-      return NextResponse.json(
-        { error: 'Invalid inventory ID format' },
-        { status: 400 }
-      )
-    }
-
-    const inventory = await BloodInventory.findById(inventoryId)
-    if (!inventory) {
-      return NextResponse.json(
-        { error: 'Inventory item not found' },
-        { status: 404 }
-      )
-    }
-
-    if (units !== undefined) inventory.units = units
-    if (minRequired !== undefined) inventory.minRequired = minRequired
-    if (maxCapacity !== undefined) inventory.maxCapacity = maxCapacity
-    if (notes !== undefined) inventory.notes = notes
-    
-    await inventory.save()
-
-    return NextResponse.json({
-      success: true,
-      data: {
-        id: inventory._id.toString(),
-        bloodType: inventory.bloodType,
-        units: inventory.units,
-        minRequired: inventory.minRequired,
-        maxCapacity: inventory.maxCapacity,
-        status: inventory.status,
-        notes: inventory.notes,
-        updatedAt: inventory.updatedAt
-      },
-      message: 'Inventory updated successfully'
-    })
-
-  } catch (error: any) {
-    console.error('Error updating inventory:', error)
-    return NextResponse.json(
-      { error: error.message || 'Failed to update inventory' },
-      { status: 500 }
-    )
-  }
-}
-
+// ============================================================
+// POST - Add / Update stock
+// ============================================================
 export async function POST(request: NextRequest) {
   try {
-    await dbConnect()
+    await dbConnect();
 
-    const authHeader = request.headers.get('authorization')
+    const authHeader = request.headers.get('authorization');
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return NextResponse.json(
         { error: 'Unauthorized - No token provided' },
         { status: 401 }
-      )
+      );
     }
 
-    const token = authHeader.split(' ')[1]
-    
+    const token = authHeader.split(' ')[1];
     let decoded: any;
-    
+
     try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret') as any
-      if (!decoded || (decoded.role !== 'admin' && decoded.role !== 'hospital')) {
+      decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret') as any;
+      if (!decoded || decoded.role !== 'admin') {
         return NextResponse.json(
-          { error: 'Unauthorized - Admin or Hospital access required' },
+          { error: 'Unauthorized - Admin access required' },
           { status: 403 }
-        )
+        );
       }
-    } catch (jwtError) {
+    } catch {
       return NextResponse.json(
         { error: 'Unauthorized - Invalid token' },
         { status: 401 }
-      )
+      );
     }
 
-    const body = await request.json()
-    const { hospitalId, bloodType, units, minRequired, maxCapacity, expirationDate, batchNumber, notes } = body
+    const body = await request.json();
+    const {
+      hospitalId,
+      bloodType,
+      units,
+      minRequired = 15,
+      maxCapacity = 60,
+      expirationDate,
+      notes = '',
+      batchNumber = '',
+    } = body;
 
-    if (!bloodType || units === undefined) {
+    if (!hospitalId || !bloodType || units === undefined || !expirationDate) {
       return NextResponse.json(
-        { error: 'Blood type and units are required' },
+        { error: 'hospitalId, bloodType, units and expirationDate are required' },
         { status: 400 }
-      )
+      );
     }
 
-    let targetHospitalId = hospitalId;
-    if (!targetHospitalId && decoded.role === 'hospital') {
-      targetHospitalId = decoded.userId;
-    }
-
-    if (!targetHospitalId || !mongoose.Types.ObjectId.isValid(targetHospitalId)) {
+    if (!mongoose.Types.ObjectId.isValid(hospitalId)) {
       return NextResponse.json(
-        { error: 'Invalid or missing hospital ID' },
+        { error: 'Invalid hospitalId' },
         { status: 400 }
-      )
+      );
     }
 
-    const hospital = await Hospital.findById(targetHospitalId)
-    if (!hospital) {
-      return NextResponse.json(
-        { error: 'Hospital not found' },
-        { status: 404 }
-      )
-    }
-
-    const existingInventory = await BloodInventory.findOne({ 
-      hospitalId: targetHospitalId,
-      bloodType: bloodType
-    })
-
-    if (existingInventory) {
-      return NextResponse.json(
-        { error: 'Inventory already exists for this blood type. Use PUT to update.' },
-        { status: 409 }
-      )
-    }
-
-    const newInventory = await BloodInventory.create({
-      hospitalId: targetHospitalId,
-      bloodType: bloodType,
-      units: units,
-      minRequired: minRequired || 15,
-      maxCapacity: maxCapacity || 60,
-      expirationDate: expirationDate || new Date(Date.now() + 42 * 24 * 60 * 60 * 1000),
-      batchNumber: batchNumber || '',
-      notes: notes || ''
-    })
+    // Upsert (because of unique index on hospitalId + bloodType)
+    const inventory = await BloodInventory.findOneAndUpdate(
+      {
+        hospitalId: new mongoose.Types.ObjectId(hospitalId),
+        bloodType,
+      },
+      {
+        units,
+        minRequired,
+        maxCapacity,
+        expirationDate: new Date(expirationDate),
+        notes,
+        batchNumber,
+        // status is auto-calculated by the pre-save hook
+      },
+      {
+        upsert: true,
+        new: true,
+        runValidators: true,
+        setDefaultsOnInsert: true,
+      }
+    );
 
     return NextResponse.json({
       success: true,
+      message: 'Inventory saved successfully',
       data: {
-        id: newInventory._id.toString(),
-        hospitalId: newInventory.hospitalId,
-        bloodType: newInventory.bloodType,
-        units: newInventory.units,
-        minRequired: newInventory.minRequired,
-        maxCapacity: newInventory.maxCapacity,
-        status: newInventory.status,
-        expirationDate: newInventory.expirationDate,
-        batchNumber: newInventory.batchNumber,
-        notes: newInventory.notes,
-        createdAt: newInventory.createdAt
+        id: inventory._id.toString(),
+        hospitalId: inventory.hospitalId.toString(),
+        bloodType: inventory.bloodType,
+        units: inventory.units,
+        status: inventory.status,
       },
-      message: 'Inventory created successfully'
-    })
-
+    });
   } catch (error: any) {
-    console.error('Error creating inventory:', error)
+    console.error('Error saving inventory:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to create inventory' },
+      { error: error.message || 'Failed to save inventory' },
       { status: 500 }
-    )
+    );
   }
 }

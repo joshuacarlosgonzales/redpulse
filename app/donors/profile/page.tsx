@@ -27,11 +27,9 @@ import {
   Weight,
   Calendar as CalendarIcon,
   IdCard,
-  Shield,
-  Clock,
-  XCircle,
   Award,
-  Activity
+  Clock,
+  Shield
 } from "lucide-react";
 
 interface DonorProfile {
@@ -63,8 +61,6 @@ interface DonorProfile {
   emergencyRelationship?: string;
   _id?: string;
   donorId?: string;
-  nextEligibleDate?: string;
-  eligibilityReason?: string;
 }
 
 export default function DonorProfilePage() {
@@ -109,6 +105,8 @@ export default function DonorProfilePage() {
       setLoading(true);
       const token = localStorage.getItem('token');
       
+      console.log('📥 Fetching donor profile...');
+      
       const userStr = localStorage.getItem('user');
       if (!userStr) {
         setLoading(false);
@@ -118,12 +116,14 @@ export default function DonorProfilePage() {
       const userData = JSON.parse(userStr);
       const userId = userData.id || userData.userId;
       
+      // Try to fetch from donor API
       let response = await fetch(`/api/donors/${userId}`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
       });
 
+      // If donor API fails, try user profile API
       if (!response.ok) {
         console.log('⚠️ Donor API failed, trying user profile API...');
         response = await fetch('/api/user/profile', {
@@ -138,6 +138,12 @@ export default function DonorProfilePage() {
         console.log('📥 Profile data received:', data);
         
         let donorData = data.data || data;
+        
+        // ✅ Calculate points properly
+        const totalDonations = donorData.totalDonations || 0;
+        const pointsFromDonor = donorData.points || 0;
+        // If points is 0 but totalDonations > 0, calculate points from donations
+        const calculatedPoints = pointsFromDonor > 0 ? pointsFromDonor : totalDonations * 10;
         
         const profileData: DonorProfile = {
           id: donorData._id || donorData.id || donorData.userId || userId || 'unknown',
@@ -163,19 +169,21 @@ export default function DonorProfilePage() {
           digitalId: donorData.digitalId || userData.digitalId || `RP-${String(Math.floor(Math.random() * 10000)).padStart(4, '0')}`,
           status: donorData.status || userData.status || 'pending',
           isEligible: donorData.isEligible || userData.isEligible || false,
-          totalDonations: donorData.totalDonations || userData.totalDonations || 0,
+          totalDonations: totalDonations,
           lastDonationDate: donorData.lastDonationDate || userData.lastDonationDate || '',
-          points: donorData.points || userData.points || 0,
+          points: calculatedPoints,
           emergencyName: donorData.emergencyName || userData.emergencyName || '',
-          emergencyRelationship: donorData.emergencyRelationship || userData.emergencyRelationship || '',
-          nextEligibleDate: donorData.nextEligible || userData.nextEligible || '',
-          eligibilityReason: donorData.eligibilityReason || userData.eligibilityReason || ''
+          emergencyRelationship: donorData.emergencyRelationship || userData.emergencyRelationship || ''
         };
         
         setProfile(profileData);
         setEditForm(profileData);
       } else {
+        // If all APIs fail, use localStorage data
         console.log('⚠️ All APIs failed, using localStorage data');
+        const totalDonations = userData.totalDonations || 0;
+        const calculatedPoints = userData.points || totalDonations * 10;
+        
         const fallbackProfile: DonorProfile = {
           id: userData.id || userData.userId || 'unknown',
           _id: userData.id || userData.userId || 'unknown',
@@ -200,13 +208,11 @@ export default function DonorProfilePage() {
           digitalId: userData.digitalId || `RP-${String(Math.floor(Math.random() * 10000)).padStart(4, '0')}`,
           status: userData.status || 'pending',
           isEligible: userData.isEligible || false,
-          totalDonations: userData.totalDonations || 0,
+          totalDonations: totalDonations,
           lastDonationDate: userData.lastDonationDate || '',
-          points: userData.points || 0,
+          points: calculatedPoints,
           emergencyName: userData.emergencyName || '',
-          emergencyRelationship: userData.emergencyRelationship || '',
-          nextEligibleDate: userData.nextEligible || '',
-          eligibilityReason: userData.eligibilityReason || ''
+          emergencyRelationship: userData.emergencyRelationship || ''
         };
         setProfile(fallbackProfile);
         setEditForm(fallbackProfile);
@@ -221,6 +227,35 @@ export default function DonorProfilePage() {
   const showNotification = (type: 'success' | 'error', message: string) => {
     setNotification({ type, message });
     setTimeout(() => setNotification(null), 5000);
+  };
+
+  // ✅ Helper function to calculate next eligible date
+  const getNextEligibleDate = (lastDonationDate?: string) => {
+    if (!lastDonationDate) return null;
+    const last = new Date(lastDonationDate);
+    if (isNaN(last.getTime())) return null;
+    const next = new Date(last);
+    next.setDate(next.getDate() + 45);
+    return next;
+  };
+
+  // ✅ Helper function to calculate days until eligible
+  const getDaysUntilEligible = (lastDonationDate?: string) => {
+    const nextDate = getNextEligibleDate(lastDonationDate);
+    if (!nextDate) return null;
+    const now = new Date();
+    const diff = Math.ceil((nextDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    return diff > 0 ? diff : 0;
+  };
+
+  // ✅ Helper function to calculate total points
+  const calculateTotalPoints = () => {
+    if (!profile) return 0;
+    // If points are stored directly and > 0, use them
+    if (profile.points && profile.points > 0) return profile.points;
+    // Otherwise calculate from donations (10 points per donation)
+    if (profile.totalDonations) return profile.totalDonations * 10;
+    return 0;
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -348,45 +383,6 @@ export default function DonorProfilePage() {
     }
   };
 
-  const getEligibilityStatusColor = (status: string) => {
-    switch (status) {
-      case 'eligible':
-        return 'text-green-600 bg-green-50 dark:bg-green-900/30 border-green-200 dark:border-green-800';
-      case 'pending':
-        return 'text-yellow-600 bg-yellow-50 dark:bg-yellow-900/30 border-yellow-200 dark:border-yellow-800';
-      case 'ineligible':
-        return 'text-red-600 bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800';
-      default:
-        return 'text-zinc-600 bg-zinc-50 dark:bg-zinc-900/30 border-zinc-200 dark:border-zinc-800';
-    }
-  };
-
-  const getEligibilityIcon = (status: string) => {
-    switch (status) {
-      case 'eligible':
-        return <CheckCircle className="h-6 w-6 text-green-600" />;
-      case 'pending':
-        return <Clock className="h-6 w-6 text-yellow-600" />;
-      case 'ineligible':
-        return <XCircle className="h-6 w-6 text-red-600" />;
-      default:
-        return <AlertCircle className="h-6 w-6 text-zinc-600" />;
-    }
-  };
-
-  const getEligibilityText = (status: string) => {
-    switch (status) {
-      case 'eligible':
-        return '✅ Eligible to Donate';
-      case 'pending':
-        return '⏳ Pending Review';
-      case 'ineligible':
-        return '❌ Currently Ineligible';
-      default:
-        return 'Unknown Status';
-    }
-  };
-
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-red-50 to-red-100 dark:from-black dark:to-red-950/30">
@@ -417,8 +413,9 @@ export default function DonorProfilePage() {
     );
   }
 
-  const eligibilityStatus = profile.isEligible ? 'eligible' : 
-                           profile.status === 'pending' ? 'pending' : 'ineligible';
+  const totalPoints = calculateTotalPoints();
+  const daysUntilEligible = getDaysUntilEligible(profile.lastDonationDate);
+  const nextEligibleDate = getNextEligibleDate(profile.lastDonationDate);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-red-50 to-red-100 dark:from-black dark:to-red-950/30 py-8 px-4">
@@ -485,7 +482,6 @@ export default function DonorProfilePage() {
         </div>
 
         <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
-          {/* Header */}
           <div className="bg-gradient-to-r from-red-600 to-red-700 p-6 text-white">
             <div className="flex items-center gap-4">
               <div className="h-20 w-20 rounded-full bg-white/20 flex items-center justify-center text-3xl font-bold border-4 border-white/30">
@@ -508,13 +504,15 @@ export default function DonorProfilePage() {
                   <span className="px-2 py-0.5 bg-white/20 rounded-full text-xs font-medium">
                     ID: {profile.digitalId}
                   </span>
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                    profile.isEligible 
-                      ? 'bg-green-500/30' 
-                      : 'bg-red-500/30'
-                  }`}>
-                    {profile.isEligible ? '✅ Eligible' : '⛔ Not Eligible'}
-                  </span>
+                  {profile.isEligible !== undefined && (
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                      profile.isEligible 
+                        ? 'bg-green-500/30' 
+                        : 'bg-red-500/30'
+                    }`}>
+                      {profile.isEligible ? '✅ Eligible' : '⛔ Not Eligible'}
+                    </span>
+                  )}
                 </div>
               </div>
               <Link href="/donors/digital-id">
@@ -526,41 +524,6 @@ export default function DonorProfilePage() {
             </div>
           </div>
 
-          {/* Eligibility Status Banner */}
-          <div className={`m-4 p-4 rounded-xl border-2 ${getEligibilityStatusColor(eligibilityStatus)}`}>
-            <div className="flex items-center gap-4">
-              {getEligibilityIcon(eligibilityStatus)}
-              <div className="flex-1">
-                <h3 className="text-lg font-semibold text-zinc-900 dark:text-white">
-                  {getEligibilityText(eligibilityStatus)}
-                </h3>
-                <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                  {eligibilityStatus === 'eligible' 
-                    ? `You can donate again on ${profile.nextEligibleDate ? new Date(profile.nextEligibleDate).toLocaleDateString() : 'N/A'}`
-                    : eligibilityStatus === 'pending'
-                    ? 'Your eligibility is being reviewed by our medical team. This usually takes 1-2 business days.'
-                    : profile.eligibilityReason || 'Please contact our medical team for more information.'}
-                </p>
-              </div>
-              <div className="flex flex-col items-end">
-                {eligibilityStatus === 'eligible' && (
-                  <Link href="/donors/schedule">
-                    <button className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition">
-                      Schedule Now
-                    </button>
-                  </Link>
-                )}
-                {eligibilityStatus === 'pending' && (
-                  <span className="text-xs text-yellow-600 dark:text-yellow-400">
-                    <Clock className="h-4 w-4 inline mr-1" />
-                    Waiting for Review
-                  </span>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Profile Form */}
           <form className="p-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="md:col-span-2">
@@ -805,13 +768,10 @@ export default function DonorProfilePage() {
               </div>
             </div>
 
-            {/* Stats and Verification */}
+            {/* ✅ Fixed Statistics Section */}
             <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="p-4 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg border border-zinc-200 dark:border-zinc-700">
-                <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300 flex items-center gap-2">
-                  <Shield className="h-4 w-4 text-green-600" />
-                  Verification Status
-                </p>
+                <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Verification Status</p>
                 <p className="text-sm text-zinc-500 dark:text-zinc-400">
                   {profile.isVerified ? '✅ Account is verified' : '⏳ Pending verification'}
                 </p>
@@ -825,30 +785,69 @@ export default function DonorProfilePage() {
               
               <div className="p-4 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg border border-zinc-200 dark:border-zinc-700">
                 <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300 flex items-center gap-2">
-                  <Award className="h-4 w-4 text-yellow-600" />
+                  <Award className="h-4 w-4 text-yellow-500" />
                   Donor Statistics
                 </p>
-                <div className="space-y-2 mt-1">
+                <div className="flex justify-between items-center mt-1">
+                  <span className="text-sm text-zinc-500 dark:text-zinc-400">Total Donations</span>
+                  <span className="text-sm font-semibold text-zinc-900 dark:text-white">
+                    {profile.totalDonations || 0}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-zinc-500 dark:text-zinc-400">Points Earned</span>
+                  <span className="text-sm font-semibold text-yellow-600 dark:text-yellow-400">
+                    {totalPoints}
+                  </span>
+                </div>
+                {profile.lastDonationDate && (
                   <div className="flex justify-between items-center">
-                    <span className="text-sm text-zinc-500 dark:text-zinc-400">Total Donations</span>
-                    <span className="text-sm font-semibold text-zinc-900 dark:text-white">
-                      {profile.totalDonations || 0}
+                    <span className="text-sm text-zinc-500 dark:text-zinc-400">Last Donation</span>
+                    <span className="text-sm font-medium text-zinc-900 dark:text-white">
+                      {new Date(profile.lastDonationDate).toLocaleDateString()}
                     </span>
                   </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-zinc-500 dark:text-zinc-400">Points Earned</span>
-                    <span className="text-sm font-semibold text-yellow-600 dark:text-yellow-400">
-                      {profile.points || 0}
-                    </span>
-                  </div>
-                  {profile.lastDonationDate && (
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-zinc-500 dark:text-zinc-400">Last Donation</span>
-                      <span className="text-sm font-medium text-zinc-900 dark:text-white">
-                        {new Date(profile.lastDonationDate).toLocaleDateString()}
-                      </span>
-                    </div>
-                  )}
+                )}
+                <div className="flex justify-between items-center mt-1 pt-1 border-t border-zinc-200 dark:border-zinc-700">
+                  <span className="text-sm text-zinc-500 dark:text-zinc-400 flex items-center gap-1">
+                    <Clock className="h-3 w-3" />
+                    Next Eligible
+                  </span>
+                  <span className={`text-sm font-medium ${
+                    daysUntilEligible === 0 
+                      ? 'text-green-600 dark:text-green-400' 
+                      : 'text-zinc-600 dark:text-zinc-400'
+                  }`}>
+                    {daysUntilEligible === 0 ? (
+                      '✅ Eligible Now'
+                    ) : nextEligibleDate ? (
+                      `${daysUntilEligible} days (${nextEligibleDate.toLocaleDateString()})`
+                    ) : (
+                      'N/A'
+                    )}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* ✅ Blood Type Info Card */}
+            <div className="mt-4 p-4 bg-gradient-to-r from-red-50 to-red-100 dark:from-red-950/20 dark:to-red-900/20 rounded-lg border border-red-200 dark:border-red-800">
+              <div className="flex items-center gap-3">
+                <div className="h-12 w-12 rounded-full bg-red-600/20 flex items-center justify-center">
+                  <Droplet className="h-6 w-6 text-red-600" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-zinc-900 dark:text-white">
+                    Blood Type: {profile.bloodType}
+                  </p>
+                  <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                    Rh Factor: {profile.bloodType.includes('+') ? 'Positive (+) ✅' : 'Negative (-) ⚠️'}
+                  </p>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                    {profile.bloodType.includes('+') 
+                      ? 'Can receive: + and - types of same blood group' 
+                      : 'Can only receive: - types of same blood group'}
+                  </p>
                 </div>
               </div>
             </div>

@@ -24,6 +24,9 @@ export interface IUser extends Document {
   hospitalCapacity?: number
   hospitalEmail?: string
   hospitalWebsite?: string
+  // OTP fields for password reset
+  resetPasswordOTP?: string
+  resetPasswordOTPExpires?: Date
   createdAt: Date
   updatedAt: Date
 }
@@ -129,6 +132,15 @@ const UserSchema: Schema<IUser> = new Schema(
       type: String,
       trim: true,
     },
+    // 🔐 OTP fields for password reset
+    resetPasswordOTP: {
+      type: String,
+      default: null,
+    },
+    resetPasswordOTPExpires: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,
@@ -146,7 +158,6 @@ UserSchema.methods.toJSON = function() {
 UserSchema.index({ role: 1 })
 UserSchema.index({ bloodType: 1 })
 
-// ✅ FIXED: Explicitly specify the collection name as 'users'
 const User: Model<IUser> = mongoose.models.User || mongoose.model<IUser>('User', UserSchema, 'users')
 
 export default User

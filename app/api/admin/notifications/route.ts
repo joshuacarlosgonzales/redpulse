@@ -1,6 +1,6 @@
 // app/api/admin/notifications/route.ts
 import { NextResponse } from 'next/server';
-import { dbConnect } from '@/lib/db';
+import dbConnect from '@/lib/mongodb';
 import Notification from '@/models/Notification';
 import jwt from 'jsonwebtoken';
 
@@ -12,7 +12,7 @@ export async function GET(request: Request) {
     if (!token) {
       return NextResponse.json({
         success: false,
-        error: 'Unauthorized'
+        error: 'Unauthorized - No token provided'
       }, { status: 401 });
     }
 
@@ -24,24 +24,40 @@ export async function GET(request: Request) {
     if (decoded.role !== 'admin') {
       return NextResponse.json({
         success: false,
-        error: 'Unauthorized'
+        error: 'Forbidden - Admin access required'
       }, { status: 403 });
     }
 
-    // Get all notifications with user info
-    const notifications = await Notification.find()
+    // Get all notifications - only populate fields that exist in the schema
+    const notifications = await Notification.find({ isDeleted: { $ne: true } })
       .sort({ createdAt: -1 })
       .populate('userId', 'fullName email')
+      .populate('donorId', 'fullName email')
       .limit(100)
       .lean();
 
+    // Get unread count
+    const unreadCount = await Notification.countDocuments({
+      isRead: false,
+      isDeleted: { $ne: true }
+    });
+
     return NextResponse.json({
       success: true,
-      data: notifications
+      data: notifications,
+      unreadCount
     });
 
   } catch (error: any) {
     console.error('Error fetching notifications:', error);
+    
+    if (error.name === 'JsonWebTokenError') {
+      return NextResponse.json({
+        success: false,
+        error: 'Invalid token'
+      }, { status: 401 });
+    }
+
     return NextResponse.json({
       success: false,
       error: error.message || 'Failed to fetch notifications'

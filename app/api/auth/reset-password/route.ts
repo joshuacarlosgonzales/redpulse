@@ -8,14 +8,16 @@ export async function POST(request: Request) {
   try {
     await dbConnect()
     
-    const { email, newPassword } = await request.json()
+    const body = await request.json()
+    const { email, otp, newPassword } = body
     
-    console.log('🔍 Reset password for:', email)
+    console.log('🔍 Reset password for email:', email)
+    console.log('🔍 OTP provided:', otp)
     
-    if (!email || !newPassword) {
+    if (!email || !otp || !newPassword) {
       return NextResponse.json({
         success: false,
-        error: 'Email and new password are required'
+        error: 'Email, OTP, and new password are required'
       }, { status: 400 })
     }
     
@@ -36,58 +38,55 @@ export async function POST(request: Request) {
     }
     
     const cleanEmail = email.trim().toLowerCase()
-    console.log('🔍 Searching for:', cleanEmail)
-    
-    // Use the users collection directly
     const usersCollection = db.collection('users')
     
-    // First, check all users in the collection
-    const allUsers = await usersCollection.find({}).project({ email: 1, role: 1 }).toArray()
-    console.log('📊 All users in users collection:', allUsers.map(u => ({ email: u.email, role: u.role })))
-    
-    // Find the user
-    let user = await usersCollection.findOne({ email: cleanEmail })
-    
-    if (!user) {
-      console.log('🔍 Trying case insensitive...')
-      user = await usersCollection.findOne({ 
-        email: { $regex: cleanEmail, $options: 'i' } 
-      })
-    }
+    // Find user with valid OTP
+    const user = await usersCollection.findOne({
+      email: cleanEmail,
+      resetPasswordOTP: otp,
+      resetPasswordOTPExpires: {
+        $gt: new Date(),
+      },
+    })
     
     if (!user) {
-      console.log('❌ User not found')
+      console.log('❌ Invalid or expired OTP for:', cleanEmail)
       return NextResponse.json({
         success: false,
-        error: 'User not found',
-        debug: {
-          searchedEmail: cleanEmail,
-          availableUsers: allUsers.map(u => u.email)
-        }
-      }, { status: 404 })
+        error: 'Invalid or expired code. Please request a new one.'
+      }, { status: 400 })
     }
     
-    console.log('✅ User found:', user.email)
-    console.log('✅ Role:', user.role)
+    console.log('✅ User found with valid OTP:', user.email)
     
     // Hash the new password
     const salt = await bcrypt.genSalt(10)
     const hashedPassword = await bcrypt.hash(newPassword, salt)
     
-    // Update the user
+    // Update the user and clear OTP fields
     const result = await usersCollection.updateOne(
       { _id: user._id },
-      { $set: { password: hashedPassword } }
+      { 
+        $set: { 
+          password: hashedPassword,
+          updatedAt: new Date()
+        },
+        $unset: {
+          resetPasswordOTP: "",
+          resetPasswordOTPExpires: "",
+        }
+      }
     )
     
     console.log('✅ Password updated:', result.modifiedCount > 0 ? 'Success' : 'No changes')
     
     return NextResponse.json({
       success: true,
-      message: 'Password updated successfully',
-      email: user.email,
-      role: user.role,
-      modifiedCount: result.modifiedCount
+      message: 'Password has been reset successfully',
+      data: {
+        email: user.email,
+        modifiedCount: result.modifiedCount
+      }
     })
     
   } catch (error: any) {

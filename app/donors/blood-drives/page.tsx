@@ -1,7 +1,7 @@
 // app/donors/blood-drives/page.tsx
 'use client';
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -15,20 +15,18 @@ import {
   X,
   Loader2,
   AlertCircle,
-  CalendarCheck,
   MapPin as MapPinIcon,
   Clock as ClockIcon,
   Heart as HeartIcon,
-  Filter,
-  ChevronDown,
-  Plus,
   Trash2,
   XCircle,
   ArrowLeft,
   Eye,
   Phone,
   Mail,
-  Info
+  Info,
+  ChevronRight,
+  Bookmark
 } from "lucide-react";
 
 interface BloodDrive {
@@ -55,7 +53,7 @@ export default function BloodDrivesPage() {
   const [loading, setLoading] = useState(true);
   const [bloodDrives, setBloodDrives] = useState<BloodDrive[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
-  const [filter, setFilter] = useState("all");
+  const [filter, setFilter] = useState("available");
   const [registering, setRegistering] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState<string | null>(null);
   const [showCancelModal, setShowCancelModal] = useState(false);
@@ -63,19 +61,27 @@ export default function BloodDrivesPage() {
   const [selectedDriveId, setSelectedDriveId] = useState<string | null>(null);
   const [selectedDriveTitle, setSelectedDriveTitle] = useState<string>("");
   const [selectedDrive, setSelectedDrive] = useState<BloodDrive | null>(null);
-  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [toast, setToast] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const router = useRouter();
 
-  useEffect(() => {
-    fetchBloodDrives();
-  }, []);
-
-  const showToast = (type: 'success' | 'error', message: string) => {
+  const showToast = (type: 'success' | 'error' | 'info', message: string) => {
     setToast({ type, message });
     setTimeout(() => setToast(null), 5000);
   };
 
-  const fetchBloodDrives = async () => {
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    const user = localStorage.getItem('user');
+    if (!token || !user) {
+      router.push('/auth/login');
+      return;
+    }
+    setIsAuthenticated(true);
+    fetchBloodDrives();
+  }, []);
+
+  const fetchBloodDrives = useCallback(async () => {
     try {
       setLoading(true);
       const token = localStorage.getItem('token');
@@ -84,74 +90,99 @@ export default function BloodDrivesPage() {
         return;
       }
 
-      const response = await fetch('/api/user/blood-drives?status=all&limit=20', {
+      const response = await fetch('/api/user/blood-drives?status=all&limit=100', {
         headers: {
-          'Authorization': `Bearer ${token}`
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
         }
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        setBloodDrives(data.data || []);
-      } else if (response.status === 401) {
+      if (response.status === 401) {
         localStorage.removeItem('token');
         localStorage.removeItem('user');
         router.push('/auth/login');
+        return;
+      }
+
+      if (!response.ok) {
+        let errorMessage = 'Failed to load blood drives';
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.error || errorMessage;
+        } catch {
+          errorMessage = `Error ${response.status}: ${response.statusText || 'Failed to load blood drives'}`;
+        }
+        console.error('API Error:', errorMessage);
+        showToast('error', errorMessage);
+        setBloodDrives([]);
+        return;
+      }
+
+      const data = await response.json();
+      
+      let drives = [];
+      if (data.success && data.data) {
+        drives = data.data;
+      } else if (data.data) {
+        drives = data.data;
+      } else if (Array.isArray(data)) {
+        drives = data;
       } else {
-        // Mock data for testing if API fails
-        setBloodDrives([
-          {
-            id: '1',
-            title: 'City Hospital Blood Drive',
-            description: 'Annual blood donation drive at City Hospital',
-            location: 'City Hospital, Main Lobby',
-            address: '123 Medical Drive, City',
-            date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-            startTime: '08:00',
-            endTime: '17:00',
-            status: 'upcoming',
-            bloodTypesNeeded: ['A+', 'O+', 'B+'],
-            targetDonors: 50,
-            registeredDonors: 32,
-            completedDonations: 0,
-            organizer: 'City Hospital Blood Bank',
-            contactNumber: '(02) 8123-4567',
-            contactEmail: 'bloodbank@cityhospital.com',
-            isRegistered: false
-          },
-          {
-            id: '2',
-            title: 'Community Center Blood Drive',
-            description: 'Community-wide blood donation event',
-            location: 'Barangay Community Center',
-            address: '456 Peace Street, Barangay',
-            date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
-            startTime: '09:00',
-            endTime: '18:00',
-            status: 'upcoming',
-            bloodTypesNeeded: ['O-', 'AB+', 'A-'],
-            targetDonors: 30,
-            registeredDonors: 18,
-            completedDonations: 0,
-            organizer: 'Red Cross',
-            contactNumber: '(02) 8765-4321',
-            contactEmail: 'community@redcross.org',
-            isRegistered: false
-          }
-        ]);
+        drives = [];
+      }
+
+      const formattedDrives: BloodDrive[] = drives.map((drive: any) => ({
+        id: drive.id || drive._id,
+        title: drive.title || 'Untitled Blood Drive',
+        description: drive.description || '',
+        location: drive.location || 'Location not specified',
+        address: drive.address || '',
+        date: drive.date || new Date().toISOString(),
+        startTime: drive.startTime || '09:00',
+        endTime: drive.endTime || '17:00',
+        status: drive.status || 'upcoming',
+        bloodTypesNeeded: drive.bloodTypesNeeded || [],
+        targetDonors: drive.targetDonors || 0,
+        registeredDonors: drive.registeredDonors || 0,
+        completedDonations: drive.completedDonations || 0,
+        organizer: drive.organizer || '',
+        contactNumber: drive.contactNumber || '',
+        contactEmail: drive.contactEmail || '',
+        isRegistered: drive.isRegistered || false,
+      }));
+
+      // Sort: Registered drives first, then available drives
+      const sortedDrives = formattedDrives.sort((a: BloodDrive, b: BloodDrive) => {
+        // Registered drives first
+        if (a.isRegistered && !b.isRegistered) return -1;
+        if (!a.isRegistered && b.isRegistered) return 1;
+        // Then sort by date (upcoming first)
+        return new Date(a.date).getTime() - new Date(b.date).getTime();
+      });
+
+      setBloodDrives(sortedDrives);
+      
+      if (sortedDrives.length === 0) {
+        showToast('info', 'No blood drives available at the moment.');
       }
     } catch (error) {
       console.error('Error fetching blood drives:', error);
-      showToast('error', 'Failed to load blood drives');
+      showToast('error', 'Failed to load blood drives. Please refresh the page.');
+      setBloodDrives([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, [router]);
 
   const handleRegister = async (driveId: string) => {
     setRegistering(driveId);
     try {
       const token = localStorage.getItem('token');
+      if (!token) {
+        router.push('/auth/login');
+        return;
+      }
+
       const response = await fetch(`/api/user/blood-drives/${driveId}/register`, {
         method: 'POST',
         headers: {
@@ -163,13 +194,7 @@ export default function BloodDrivesPage() {
       const data = await response.json();
 
       if (response.ok) {
-        setBloodDrives(prev => 
-          prev.map(d => 
-            d.id === driveId 
-              ? { ...d, registeredDonors: d.registeredDonors + 1, isRegistered: true }
-              : d
-          )
-        );
+        await fetchBloodDrives();
         showToast('success', '✅ Successfully registered for the blood drive! 🎉');
       } else {
         showToast('error', data.error || '❌ Failed to register. Please try again.');
@@ -186,6 +211,11 @@ export default function BloodDrivesPage() {
     setCancelling(driveId);
     try {
       const token = localStorage.getItem('token');
+      if (!token) {
+        router.push('/auth/login');
+        return;
+      }
+
       const response = await fetch(`/api/user/blood-drives/${driveId}/cancel-registration`, {
         method: 'POST',
         headers: {
@@ -197,13 +227,7 @@ export default function BloodDrivesPage() {
       const data = await response.json();
 
       if (response.ok) {
-        setBloodDrives(prev => 
-          prev.map(d => 
-            d.id === driveId 
-              ? { ...d, registeredDonors: Math.max(0, d.registeredDonors - 1), isRegistered: false }
-              : d
-          )
-        );
+        await fetchBloodDrives();
         showToast('success', '✅ Successfully cancelled your registration.');
         setShowCancelModal(false);
         setSelectedDriveId(null);
@@ -232,10 +256,10 @@ export default function BloodDrivesPage() {
 
   const getStatusColor = (status: string) => {
     const colors = {
-      upcoming: 'bg-blue-100 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400',
-      ongoing: 'bg-green-100 dark:bg-green-950/30 text-green-700 dark:text-green-400',
-      completed: 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-400',
-      cancelled: 'bg-red-100 dark:bg-red-950/30 text-red-700 dark:text-red-400'
+      upcoming: 'bg-sky-50 dark:bg-sky-950/30 text-sky-700 dark:text-sky-400 border-sky-200 dark:border-sky-800',
+      ongoing: 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800',
+      completed: 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700',
+      cancelled: 'bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-400 border-rose-200 dark:border-rose-800'
     };
     return colors[status as keyof typeof colors] || colors.upcoming;
   };
@@ -250,94 +274,130 @@ export default function BloodDrivesPage() {
     return icons[status as keyof typeof icons];
   };
 
-  const filteredDrives = bloodDrives.filter(drive => {
+  // Count total registered drives (all statuses)
+  const totalRegisteredCount = bloodDrives.filter((d: BloodDrive) => d.isRegistered).length;
+
+  const filteredDrives = bloodDrives.filter((drive: BloodDrive) => {
     const matchesSearch = drive.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
                           drive.location.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesFilter = filter === 'all' || drive.status === filter;
+    
+    let matchesFilter = true;
+    if (filter === 'available') {
+      // Only show upcoming and ongoing drives
+      matchesFilter = drive.status === 'upcoming' || drive.status === 'ongoing';
+    } else if (filter === 'all') {
+      matchesFilter = true;
+    } else {
+      matchesFilter = drive.status === filter;
+    }
+    
     return matchesSearch && matchesFilter;
   });
 
-  // Separate registered and unregistered drives
-  const registeredDrives = filteredDrives.filter(d => d.isRegistered);
-  const unregisteredDrives = filteredDrives.filter(d => !d.isRegistered);
+  // Separate drives by registration and status
+  const myRegisteredDrives = filteredDrives.filter((d: BloodDrive) => d.isRegistered);
+  const availableDrives = filteredDrives.filter((d: BloodDrive) => 
+    (d.status === 'upcoming' || d.status === 'ongoing') && !d.isRegistered
+  );
+  const completedDrives = filteredDrives.filter((d: BloodDrive) => 
+    (d.status === 'completed' || d.status === 'cancelled') && !d.isRegistered
+  );
 
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
-          <Loader2 className="h-12 w-12 text-red-600 animate-spin mx-auto" />
-          <p className="mt-4 text-zinc-500 dark:text-zinc-400">Loading blood drives...</p>
+          <div className="h-10 w-10 rounded-full border-2 border-zinc-100 dark:border-zinc-800 border-t-red-600 animate-spin mx-auto mb-3" />
+          <p className="text-sm text-zinc-400 dark:text-zinc-500 tracking-wide">Loading blood drives…</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <AlertCircle className="h-10 w-10 text-amber-500 mx-auto" strokeWidth={1.5} />
+          <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">Please log in to view blood drives.</p>
+          <button
+            onClick={() => router.push('/auth/login')}
+            className="mt-4 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors text-sm font-semibold"
+          >
+            Go to login
+          </button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Toast Notification */}
       {toast && (
-        <div className={`fixed top-20 right-4 z-50 p-4 rounded-lg shadow-lg border max-w-md ${
+        <div className={`fixed top-20 right-4 z-50 p-3.5 rounded-xl shadow-lg shadow-zinc-900/10 border max-w-sm ${
           toast.type === 'success' 
-            ? 'bg-green-50 dark:bg-green-950/90 border-green-200 dark:border-green-800 text-green-700 dark:text-green-300'
-            : 'bg-red-50 dark:bg-red-950/90 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300'
+            ? 'bg-emerald-50 dark:bg-emerald-950/90 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
+            : toast.type === 'error'
+            ? 'bg-rose-50 dark:bg-rose-950/90 border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300'
+            : 'bg-sky-50 dark:bg-sky-950/90 border-sky-200 dark:border-sky-800 text-sky-700 dark:text-sky-300'
         }`}>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
             {toast.type === 'success' ? (
-              <Check className="h-5 w-5 flex-shrink-0" />
+              <Check className="h-4 w-4 flex-shrink-0" />
+            ) : toast.type === 'error' ? (
+              <XCircle className="h-4 w-4 flex-shrink-0" />
             ) : (
-              <XCircle className="h-5 w-5 flex-shrink-0" />
+              <Info className="h-4 w-4 flex-shrink-0" />
             )}
-            <p className="text-sm font-medium">{toast.message}</p>
+            <p className="text-xs font-semibold">{toast.message}</p>
           </div>
         </div>
       )}
 
       {/* Cancel Registration Confirmation Modal */}
       {showCancelModal && selectedDriveId && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-zinc-900 rounded-2xl max-w-md w-full shadow-2xl">
-            <div className="p-6 border-b border-zinc-200/60 dark:border-zinc-800/60">
+        <div className="fixed inset-0 bg-zinc-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl max-w-md w-full shadow-xl shadow-zinc-900/10 border border-zinc-200 dark:border-zinc-800">
+            <div className="p-5 border-b border-zinc-100 dark:border-zinc-800">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-950/30 flex items-center justify-center">
-                  <XCircle className="w-5 h-5 text-red-600 dark:text-red-400" />
+                <div className="w-9 h-9 rounded-full bg-rose-50 dark:bg-rose-950/30 flex items-center justify-center flex-shrink-0">
+                  <XCircle className="w-4 h-4 text-rose-600 dark:text-rose-400" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-semibold text-zinc-900 dark:text-white">Cancel Registration</h3>
-                  <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                    Are you sure you want to cancel your registration?
+                  <h3 className="text-sm font-bold text-zinc-900 dark:text-white">Cancel registration</h3>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                    This will free up your spot for someone else
                   </p>
                 </div>
               </div>
             </div>
-            <div className="p-6 space-y-4">
+            <div className="p-5 space-y-3">
               <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                You are about to cancel your registration for <strong className="text-zinc-900 dark:text-white">{selectedDriveTitle}</strong>.
+                You're about to cancel your registration for <strong className="text-zinc-900 dark:text-white font-semibold">{selectedDriveTitle}</strong>. This can't be undone — you'll need to register again if you change your mind.
               </p>
-              <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                This action cannot be undone. You will need to register again if you change your mind.
-              </p>
-              <div className="flex gap-3 pt-2">
+              <div className="flex gap-2.5 pt-1">
                 <button
                   onClick={() => {
                     setShowCancelModal(false);
                     setSelectedDriveId(null);
                     setSelectedDriveTitle('');
                   }}
-                  className="flex-1 px-4 py-2.5 text-sm font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl transition"
+                  className="flex-1 px-4 py-2.5 text-sm font-semibold text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl transition-colors"
                 >
-                  Keep Registration
+                  Keep registration
                 </button>
                 <button
                   onClick={() => handleCancelRegistration(selectedDriveId)}
                   disabled={cancelling === selectedDriveId}
-                  className="flex-1 px-4 py-2.5 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-xl transition flex items-center justify-center gap-2 disabled:opacity-50"
+                  className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   {cancelling === selectedDriveId ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
                   ) : (
                     <>
-                      <XCircle className="w-4 h-4" />
-                      Cancel Registration
+                      <XCircle className="w-3.5 h-3.5" />
+                      Cancel registration
                     </>
                   )}
                 </button>
@@ -349,17 +409,17 @@ export default function BloodDrivesPage() {
 
       {/* View Details Modal */}
       {showDetailsModal && selectedDrive && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-zinc-900 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
-            <div className="p-6 border-b border-zinc-200/60 dark:border-zinc-800/60 flex items-center justify-between sticky top-0 bg-white dark:bg-zinc-900 z-10">
+        <div className="fixed inset-0 bg-zinc-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-xl shadow-zinc-900/10 border border-zinc-200 dark:border-zinc-800">
+            <div className="p-5 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between sticky top-0 bg-white dark:bg-zinc-900 z-10 rounded-t-2xl">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-950/30 flex items-center justify-center">
-                  <Info className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                <div className="w-9 h-9 rounded-full bg-teal-50 dark:bg-teal-950/30 flex items-center justify-center flex-shrink-0">
+                  <Info className="w-4 h-4 text-teal-600 dark:text-teal-400" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-semibold text-zinc-900 dark:text-white">Blood Drive Details</h3>
-                  <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                    View full information about this blood drive
+                  <h3 className="text-sm font-bold text-zinc-900 dark:text-white">Blood drive details</h3>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                    Full information about this drive
                   </p>
                 </div>
               </div>
@@ -368,53 +428,50 @@ export default function BloodDrivesPage() {
                   setShowDetailsModal(false);
                   setSelectedDrive(null);
                 }}
-                className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition"
+                className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
               >
-                <X className="w-5 h-5 text-zinc-500" />
+                <X className="w-4 h-4 text-zinc-500" />
               </button>
             </div>
 
-            <div className="p-6 space-y-6">
-              {/* Header */}
-              <div className="flex items-start justify-between">
+            <div className="p-5 space-y-5">
+              <div className="flex items-start justify-between gap-3">
                 <div>
-                  <h2 className="text-2xl font-bold text-zinc-900 dark:text-white">{selectedDrive.title}</h2>
-                  <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium ${getStatusColor(selectedDrive.status)}`}>
+                  <h2 className="text-lg font-bold text-zinc-900 dark:text-white">{selectedDrive.title}</h2>
+                  <span className={`inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded-md text-[11px] font-semibold border ${getStatusColor(selectedDrive.status)}`}>
                     {getStatusIcon(selectedDrive.status)}
                     {selectedDrive.status.charAt(0).toUpperCase() + selectedDrive.status.slice(1)}
                   </span>
                 </div>
-                <span className="text-sm text-zinc-400 dark:text-zinc-500">
+                <span className="text-xs text-zinc-400 dark:text-zinc-500 flex-shrink-0">
                   {new Date(selectedDrive.date).toLocaleDateString()}
                 </span>
               </div>
 
-              {/* Description */}
               {selectedDrive.description && (
-                <div className="p-4 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg">
+                <div className="p-3 bg-zinc-50 dark:bg-zinc-800/50 rounded-xl border border-zinc-100 dark:border-zinc-800">
                   <p className="text-sm text-zinc-600 dark:text-zinc-400">{selectedDrive.description}</p>
                 </div>
               )}
 
-              {/* Location */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <h4 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300 flex items-center gap-2">
-                    <MapPinIcon className="w-4 h-4 text-red-500" />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <h4 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide flex items-center gap-1.5">
+                    <MapPinIcon className="w-3.5 h-3.5 text-red-500" />
                     Location
                   </h4>
-                  <p className="text-sm text-zinc-600 dark:text-zinc-400">{selectedDrive.location}</p>
+                  <p className="text-sm text-zinc-700 dark:text-zinc-300">{selectedDrive.location}</p>
                   {selectedDrive.address && (
-                    <p className="text-sm text-zinc-500 dark:text-zinc-400">{selectedDrive.address}</p>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400">{selectedDrive.address}</p>
                   )}
                 </div>
 
-                <div className="space-y-2">
-                  <h4 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300 flex items-center gap-2">
-                    <ClockIcon className="w-4 h-4 text-blue-500" />
-                    Date & Time
+                <div className="space-y-1">
+                  <h4 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide flex items-center gap-1.5">
+                    <ClockIcon className="w-3.5 h-3.5 text-sky-500" />
+                    Date &amp; time
                   </h4>
-                  <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                  <p className="text-sm text-zinc-700 dark:text-zinc-300">
                     {new Date(selectedDrive.date).toLocaleDateString('en-US', {
                       weekday: 'long',
                       year: 'numeric',
@@ -422,23 +479,22 @@ export default function BloodDrivesPage() {
                       day: 'numeric'
                     })}
                   </p>
-                  <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                    {selectedDrive.startTime} - {selectedDrive.endTime}
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                    {selectedDrive.startTime} – {selectedDrive.endTime}
                   </p>
                 </div>
               </div>
 
-              {/* Blood Types Needed */}
-              <div className="space-y-2">
-                <h4 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300 flex items-center gap-2">
-                  <HeartIcon className="w-4 h-4 text-red-500" />
-                  Blood Types Needed
+              <div className="space-y-1.5">
+                <h4 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide flex items-center gap-1.5">
+                  <HeartIcon className="w-3.5 h-3.5 text-red-500" />
+                  Blood types needed
                 </h4>
-                <div className="flex flex-wrap gap-2">
-                  {selectedDrive.bloodTypesNeeded.map((type) => (
+                <div className="flex flex-wrap gap-1.5">
+                  {selectedDrive.bloodTypesNeeded.map((type: string) => (
                     <span
                       key={type}
-                      className="px-3 py-1 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 text-sm font-medium rounded-lg"
+                      className="px-2.5 py-1 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 text-xs font-semibold rounded-lg border border-red-100 dark:border-red-900"
                     >
                       {type}
                     </span>
@@ -446,71 +502,68 @@ export default function BloodDrivesPage() {
                 </div>
               </div>
 
-              {/* Statistics */}
-              <div className="grid grid-cols-3 gap-4">
-                <div className="text-center p-3 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg">
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400">Target Donors</p>
-                  <p className="text-lg font-bold text-zinc-900 dark:text-white">{selectedDrive.targetDonors}</p>
+              <div className="grid grid-cols-3 divide-x divide-zinc-100 dark:divide-zinc-800 border border-zinc-100 dark:border-zinc-800 rounded-xl overflow-hidden">
+                <div className="text-center p-3">
+                  <p className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wide">Target</p>
+                  <p className="text-base font-bold text-zinc-900 dark:text-white mt-0.5">{selectedDrive.targetDonors}</p>
                 </div>
-                <div className="text-center p-3 bg-blue-50 dark:bg-blue-950/30 rounded-lg">
-                  <p className="text-xs text-blue-600 dark:text-blue-400">Registered</p>
-                  <p className="text-lg font-bold text-blue-600 dark:text-blue-400">{selectedDrive.registeredDonors}</p>
+                <div className="text-center p-3">
+                  <p className="text-[10px] font-semibold text-teal-500 uppercase tracking-wide">Registered</p>
+                  <p className="text-base font-bold text-teal-600 dark:text-teal-400 mt-0.5">{selectedDrive.registeredDonors}</p>
                 </div>
-                <div className="text-center p-3 bg-emerald-50 dark:bg-emerald-950/30 rounded-lg">
-                  <p className="text-xs text-emerald-600 dark:text-emerald-400">Donated</p>
-                  <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400">{selectedDrive.completedDonations}</p>
+                <div className="text-center p-3">
+                  <p className="text-[10px] font-semibold text-emerald-500 uppercase tracking-wide">Donated</p>
+                  <p className="text-base font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">{selectedDrive.completedDonations}</p>
                 </div>
               </div>
 
-              {/* Contact Information */}
               {(selectedDrive.organizer || selectedDrive.contactNumber || selectedDrive.contactEmail) && (
-                <div className="space-y-2 pt-4 border-t border-zinc-200/60 dark:border-zinc-800/60">
-                  <h4 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300 flex items-center gap-2">
-                    <Users className="w-4 h-4 text-purple-500" />
-                    Contact Information
+                <div className="space-y-1.5 pt-4 border-t border-zinc-100 dark:border-zinc-800">
+                  <h4 className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide flex items-center gap-1.5">
+                    <Users className="w-3.5 h-3.5 text-violet-500" />
+                    Contact
                   </h4>
                   {selectedDrive.organizer && (
                     <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                      <span className="font-medium">Organizer:</span> {selectedDrive.organizer}
+                      <span className="font-semibold text-zinc-700 dark:text-zinc-300">Organizer:</span> {selectedDrive.organizer}
                     </p>
                   )}
                   {selectedDrive.contactNumber && (
                     <p className="text-sm text-zinc-600 dark:text-zinc-400 flex items-center gap-2">
-                      <Phone className="w-4 h-4 text-zinc-400" />
+                      <Phone className="w-3.5 h-3.5 text-zinc-400" />
                       {selectedDrive.contactNumber}
                     </p>
                   )}
                   {selectedDrive.contactEmail && (
                     <p className="text-sm text-zinc-600 dark:text-zinc-400 flex items-center gap-2">
-                      <Mail className="w-4 h-4 text-zinc-400" />
+                      <Mail className="w-3.5 h-3.5 text-zinc-400" />
                       {selectedDrive.contactEmail}
                     </p>
                   )}
                 </div>
               )}
 
-              {/* Registration Status */}
-              <div className="pt-4 border-t border-zinc-200/60 dark:border-zinc-800/60">
-                <div className="flex items-center justify-between">
+              <div className="pt-4 border-t border-zinc-100 dark:border-zinc-800">
+                <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
-                    <div className={`w-2 h-2 rounded-full ${selectedDrive.isRegistered ? 'bg-emerald-500' : 'bg-gray-300'}`} />
-                    <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                      {selectedDrive.isRegistered ? 'You are registered for this drive ✅' : 'You are not registered for this drive'}
+                    <div className={`w-1.5 h-1.5 rounded-full ${selectedDrive.isRegistered ? 'bg-emerald-500' : 'bg-zinc-300 dark:bg-zinc-600'}`} />
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                      {selectedDrive.isRegistered ? "You're registered for this drive" : "You're not registered for this drive"}
                     </p>
                   </div>
-                  {!selectedDrive.isRegistered && selectedDrive.status === 'upcoming' && (
+                  {!selectedDrive.isRegistered && (selectedDrive.status === 'upcoming' || selectedDrive.status === 'ongoing') && (
                     <button
                       onClick={() => {
                         setShowDetailsModal(false);
                         handleRegister(selectedDrive.id);
                       }}
                       disabled={registering === selectedDrive.id}
-                      className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition disabled:opacity-50"
+                      className="px-3.5 py-2 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors disabled:opacity-50"
                     >
                       {registering === selectedDrive.id ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
                       ) : (
-                        'Register Now'
+                        'Register now'
                       )}
                     </button>
                   )}
@@ -520,9 +573,9 @@ export default function BloodDrivesPage() {
                         setShowDetailsModal(false);
                         openCancelModal(selectedDrive.id, selectedDrive.title);
                       }}
-                      className="px-4 py-2 text-sm font-medium text-red-600 bg-red-50 hover:bg-red-100 dark:bg-red-950/30 dark:hover:bg-red-950/50 rounded-lg transition"
+                      className="px-3.5 py-2 text-xs font-semibold text-rose-600 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/30 dark:hover:bg-rose-950/50 rounded-lg transition-colors"
                     >
-                      Cancel Registration
+                      Cancel registration
                     </button>
                   )}
                 </div>
@@ -532,139 +585,139 @@ export default function BloodDrivesPage() {
         </div>
       )}
 
-      <div className="bg-white dark:bg-zinc-900 rounded-2xl p-6 border border-zinc-200 dark:border-zinc-800 shadow-sm">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-          <div>
-            <h2 className="text-xl font-bold text-zinc-900 dark:text-white flex items-center gap-2">
-              <Calendar className="h-6 w-6 text-red-500" />
-              Blood Drives
-            </h2>
-            <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-              Find and register for upcoming blood drives
-            </p>
+      <div className="bg-white dark:bg-zinc-900 rounded-2xl p-4 sm:p-5 border border-zinc-200 dark:border-zinc-800">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+          <div className="flex items-center gap-3">
+            <div className="h-9 w-9 rounded-xl bg-red-50 dark:bg-red-950/30 flex items-center justify-center flex-shrink-0">
+              <Calendar className="h-4.5 w-4.5 h-[18px] w-[18px] text-red-600 dark:text-red-400" />
+            </div>
+            <div>
+              <h2 className="text-base sm:text-lg font-bold text-zinc-900 dark:text-white">
+                Blood Drives
+              </h2>
+              <p className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400">
+                {myRegisteredDrives.length > 0 
+                  ? `You're registered for ${myRegisteredDrives.length} active drive${myRegisteredDrives.length > 1 ? 's' : ''}`
+                  : 'Find and register for upcoming blood drives'}
+              </p>
+            </div>
           </div>
           <div className="flex gap-2">
-            {registeredDrives.length > 0 && (
+            {totalRegisteredCount > 0 && (
               <Link
                 href="/donors/blood-drives/registered"
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition text-sm font-medium flex items-center gap-2"
+                className="px-3.5 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl transition-colors text-xs sm:text-sm font-semibold flex items-center gap-1.5"
               >
-                <Heart className="w-4 h-4" />
-                My Registrations ({registeredDrives.length})
+                <Heart className="w-3.5 h-3.5" />
+                My Registrations ({totalRegisteredCount})
+                <ChevronRight className="w-3.5 h-3.5" />
               </Link>
             )}
             <button
               onClick={fetchBloodDrives}
-              className="px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-xl transition text-sm font-medium flex items-center gap-2"
+              className="px-3.5 py-2 bg-zinc-50 dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-xl transition-colors text-xs sm:text-sm font-medium flex items-center gap-1.5"
             >
-              <ArrowLeft className="w-4 h-4" />
+              <ArrowLeft className="w-3.5 h-3.5" />
               Refresh
             </button>
           </div>
         </div>
 
         {/* Search and Filter */}
-        <div className="flex flex-col sm:flex-row gap-4 mb-6">
+        <div className="flex flex-col sm:flex-row gap-3 mb-5">
           <div className="flex-1 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
             <input
               type="text"
-              placeholder="Search blood drives..."
+              placeholder="Search blood drives…"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm text-zinc-900 dark:text-white placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+              className="w-full pl-10 pr-4 py-2.5 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm text-zinc-900 dark:text-white placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-400 transition-colors"
             />
           </div>
           <select
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            className="px-4 py-2.5 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+            className="px-3.5 py-2.5 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-400 transition-colors"
           >
-            <option value="all">📋 All Status</option>
+            <option value="available">📋 Available (Upcoming &amp; Ongoing)</option>
+            <option value="all">📋 All Drives</option>
             <option value="upcoming">⏳ Upcoming</option>
             <option value="ongoing">🟢 Ongoing</option>
             <option value="completed">✅ Completed</option>
+            <option value="cancelled">❌ Cancelled</option>
           </select>
         </div>
 
-        {/* Registered Drives Section */}
-        {registeredDrives.length > 0 && (
-          <div className="mb-6">
-            <h3 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300 mb-3 flex items-center gap-2">
-              <Heart className="w-4 h-4 text-red-500" />
-              Your Registered Drives ({registeredDrives.length})
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {registeredDrives.map((drive) => (
+        {/* My Registered Drives Section - Always shown first */}
+        {myRegisteredDrives.length > 0 && (
+          <div className="mb-7">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-1 h-4 bg-teal-500 rounded-full" />
+              <h3 className="text-xs sm:text-sm font-semibold text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5">
+                <Bookmark className="w-3.5 h-3.5 text-teal-500" />
+                My Registered Drives ({myRegisteredDrives.length})
+              </h3>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {myRegisteredDrives.map((drive: BloodDrive) => (
                 <div
                   key={drive.id}
-                  className="bg-emerald-50 dark:bg-emerald-950/20 rounded-xl border border-emerald-200 dark:border-emerald-800 shadow-sm overflow-hidden"
+                  className="bg-teal-50/50 dark:bg-teal-950/10 rounded-xl border border-teal-200 dark:border-teal-900 hover:border-teal-300 dark:hover:border-teal-800 transition-colors overflow-hidden"
                 >
-                  <div className="p-5">
+                  <div className="p-4">
                     <div className="flex items-center justify-between mb-2">
-                      <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium ${getStatusColor(drive.status)}`}>
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold border ${getStatusColor(drive.status)}`}>
                         {getStatusIcon(drive.status)}
                         {drive.status.charAt(0).toUpperCase() + drive.status.slice(1)}
                       </span>
-                      <span className="text-xs text-zinc-400 dark:text-zinc-500">
+                      <span className="text-[11px] text-zinc-400 dark:text-zinc-500">
                         {new Date(drive.date).toLocaleDateString()}
                       </span>
                     </div>
 
-                    <h3 className="text-lg font-semibold text-zinc-900 dark:text-white mb-2 line-clamp-1">
+                    <h3 className="text-sm font-bold text-zinc-900 dark:text-white mb-1.5 line-clamp-1">
                       {drive.title}
                     </h3>
 
-                    <div className="flex items-start gap-2 text-sm text-zinc-600 dark:text-zinc-400 mb-3">
-                      <MapPinIcon className="w-4 h-4 text-zinc-400 flex-shrink-0 mt-0.5" />
+                    <div className="flex items-start gap-1.5 text-xs text-zinc-500 dark:text-zinc-400 mb-2.5">
+                      <MapPinIcon className="w-3.5 h-3.5 text-zinc-400 flex-shrink-0 mt-0.5" />
                       <span className="line-clamp-1">{drive.location}</span>
                     </div>
 
-                    <div className="flex flex-wrap gap-1.5 mb-3">
-                      {drive.bloodTypesNeeded.slice(0, 3).map((type) => (
+                    <div className="flex flex-wrap gap-1 mb-2.5">
+                      {drive.bloodTypesNeeded.slice(0, 3).map((type: string) => (
                         <span
                           key={type}
-                          className="px-2 py-0.5 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 text-xs font-medium rounded"
+                          className="px-1.5 py-0.5 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 text-[10px] font-semibold rounded"
                         >
                           {type}
                         </span>
                       ))}
                       {drive.bloodTypesNeeded.length > 3 && (
-                        <span className="px-2 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 text-xs font-medium rounded">
+                        <span className="px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 text-[10px] font-semibold rounded">
                           +{drive.bloodTypesNeeded.length - 3}
                         </span>
                       )}
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2 pt-3 border-t border-emerald-200/60 dark:border-emerald-800/60">
-                      <div className="text-center">
-                        <p className="text-xs text-zinc-500 dark:text-zinc-400">Target</p>
-                        <p className="text-sm font-semibold text-zinc-900 dark:text-white">{drive.targetDonors}</p>
+                    <div className="flex items-center gap-1.5 mt-2.5 pt-2.5 border-t border-teal-200/60 dark:border-teal-900/60">
+                      <div className="flex items-center gap-1 text-[11px] font-semibold text-teal-600 dark:text-teal-400">
+                        <Heart className="w-3 h-3 fill-teal-500 text-teal-500" />
+                        Registered
                       </div>
-                      <div className="text-center">
-                        <p className="text-xs text-zinc-500 dark:text-zinc-400">Registered</p>
-                        <p className="text-sm font-semibold text-blue-600 dark:text-blue-400">{drive.registeredDonors}</p>
-                      </div>
-                    </div>
-
-                    <div className="flex gap-2 mt-4">
+                      <div className="flex-1" />
                       <button
                         onClick={() => openDetailsModal(drive)}
-                        className="flex-1 py-2 rounded-lg transition font-medium text-sm bg-blue-100 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-950/50 flex items-center justify-center gap-1"
+                        className="px-2.5 py-1 text-[11px] font-semibold text-teal-700 dark:text-teal-400 hover:bg-teal-100 dark:hover:bg-teal-950/40 rounded-md transition-colors"
                       >
-                        <Eye className="w-4 h-4" />
-                        View Details
+                        Details
                       </button>
                       <button
                         onClick={() => openCancelModal(drive.id, drive.title)}
-                        disabled={cancelling === drive.id}
-                        className="px-4 py-2 rounded-lg transition font-medium text-sm bg-red-100 dark:bg-red-950/30 text-red-600 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-950/50 flex items-center gap-1 disabled:opacity-50"
+                        className="px-2.5 py-1 text-[11px] font-semibold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-md transition-colors"
                       >
-                        {cancelling === drive.id ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <Trash2 className="w-4 h-4" />
-                        )}
+                        Cancel
                       </button>
                     </div>
                   </div>
@@ -674,83 +727,90 @@ export default function BloodDrivesPage() {
           </div>
         )}
 
-        {/* Available Drives Section */}
-        {unregisteredDrives.length > 0 && (
-          <div>
-            <h3 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300 mb-3 flex items-center gap-2">
-              <Calendar className="w-4 h-4 text-blue-500" />
-              Available Drives ({unregisteredDrives.length})
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {unregisteredDrives.map((drive) => (
+        {/* Available Drives Section - Only show available drives */}
+        {(filter === 'available' || filter === 'all') && availableDrives.length > 0 && (
+          <div className="mb-7">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-1 h-4 bg-emerald-500 rounded-full" />
+              <h3 className="text-xs sm:text-sm font-semibold text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5 text-emerald-500" />
+                Available Drives ({availableDrives.length})
+              </h3>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {availableDrives.map((drive: BloodDrive) => (
                 <div
                   key={drive.id}
-                  className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm hover:shadow-md transition-all overflow-hidden"
+                  className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 transition-colors overflow-hidden"
                 >
-                  <div className="p-5">
+                  <div className="p-4">
                     <div className="flex items-center justify-between mb-2">
-                      <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium ${getStatusColor(drive.status)}`}>
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold border ${getStatusColor(drive.status)}`}>
                         {getStatusIcon(drive.status)}
                         {drive.status.charAt(0).toUpperCase() + drive.status.slice(1)}
                       </span>
-                      <span className="text-xs text-zinc-400 dark:text-zinc-500">
+                      <span className="text-[11px] text-zinc-400 dark:text-zinc-500">
                         {new Date(drive.date).toLocaleDateString()}
                       </span>
                     </div>
 
-                    <h3 className="text-lg font-semibold text-zinc-900 dark:text-white mb-2 line-clamp-1">
+                    <h3 className="text-sm font-bold text-zinc-900 dark:text-white mb-1.5 line-clamp-1">
                       {drive.title}
                     </h3>
 
-                    <div className="flex items-start gap-2 text-sm text-zinc-600 dark:text-zinc-400 mb-3">
-                      <MapPinIcon className="w-4 h-4 text-zinc-400 flex-shrink-0 mt-0.5" />
+                    <div className="flex items-start gap-1.5 text-xs text-zinc-500 dark:text-zinc-400 mb-2.5">
+                      <MapPinIcon className="w-3.5 h-3.5 text-zinc-400 flex-shrink-0 mt-0.5" />
                       <span className="line-clamp-1">{drive.location}</span>
                     </div>
 
-                    <div className="flex flex-wrap gap-1.5 mb-3">
-                      {drive.bloodTypesNeeded.slice(0, 3).map((type) => (
+                    <div className="flex flex-wrap gap-1 mb-2.5">
+                      {drive.bloodTypesNeeded.slice(0, 3).map((type: string) => (
                         <span
                           key={type}
-                          className="px-2 py-0.5 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 text-xs font-medium rounded"
+                          className="px-1.5 py-0.5 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 text-[10px] font-semibold rounded"
                         >
                           {type}
                         </span>
                       ))}
                       {drive.bloodTypesNeeded.length > 3 && (
-                        <span className="px-2 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 text-xs font-medium rounded">
+                        <span className="px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 text-[10px] font-semibold rounded">
                           +{drive.bloodTypesNeeded.length - 3}
                         </span>
                       )}
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2 pt-3 border-t border-zinc-200/60 dark:border-zinc-800/60">
-                      <div className="text-center">
-                        <p className="text-xs text-zinc-500 dark:text-zinc-400">Target</p>
-                        <p className="text-sm font-semibold text-zinc-900 dark:text-white">{drive.targetDonors}</p>
+                    <div className="grid grid-cols-2 divide-x divide-zinc-100 dark:divide-zinc-800 border border-zinc-100 dark:border-zinc-800 rounded-lg overflow-hidden">
+                      <div className="text-center py-1.5">
+                        <p className="text-[9px] font-semibold text-zinc-400 uppercase tracking-wide">Target</p>
+                        <p className="text-xs font-bold text-zinc-900 dark:text-white">{drive.targetDonors}</p>
                       </div>
-                      <div className="text-center">
-                        <p className="text-xs text-zinc-500 dark:text-zinc-400">Registered</p>
-                        <p className="text-sm font-semibold text-blue-600 dark:text-blue-400">{drive.registeredDonors}</p>
+                      <div className="text-center py-1.5">
+                        <p className="text-[9px] font-semibold text-teal-500 uppercase tracking-wide">Registered</p>
+                        <p className="text-xs font-bold text-teal-600 dark:text-teal-400">{drive.registeredDonors}</p>
                       </div>
                     </div>
 
-                    <div className="flex gap-2 mt-4">
+                    <div className="flex gap-2 mt-3">
                       <button
                         onClick={() => openDetailsModal(drive)}
-                        className="flex-1 py-2 rounded-lg transition font-medium text-sm bg-blue-100 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-950/50 flex items-center justify-center gap-1"
+                        className="flex-1 py-1.5 rounded-lg transition-colors font-semibold text-xs bg-zinc-50 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-700 flex items-center justify-center gap-1"
                       >
-                        <Eye className="w-4 h-4" />
-                        View Details
+                        <Eye className="w-3.5 h-3.5" />
+                        Details
                       </button>
                       <button
                         onClick={() => handleRegister(drive.id)}
                         disabled={registering === drive.id}
-                        className="flex-1 py-2 rounded-lg transition font-medium text-sm bg-red-600 hover:bg-red-700 text-white disabled:opacity-50 flex items-center justify-center"
+                        className={`flex-1 py-1.5 rounded-lg transition-colors font-semibold text-xs flex items-center justify-center ${
+                          drive.status === 'upcoming' || drive.status === 'ongoing'
+                            ? 'bg-red-600 hover:bg-red-700 text-white disabled:opacity-50'
+                            : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-500 dark:text-zinc-400 cursor-not-allowed'
+                        }`}
                       >
                         {registering === drive.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
                         ) : (
-                          'Register'
+                          drive.status === 'upcoming' || drive.status === 'ongoing' ? 'Register' : 'Closed'
                         )}
                       </button>
                     </div>
@@ -761,13 +821,113 @@ export default function BloodDrivesPage() {
           </div>
         )}
 
+        {/* Completed Drives Section - Only shown when filter is 'all' or 'completed' */}
+        {(filter === 'all' || filter === 'completed') && completedDrives.length > 0 && (
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-1 h-4 bg-zinc-400 rounded-full" />
+              <h3 className="text-xs sm:text-sm font-semibold text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-zinc-400" />
+                Past Drives ({completedDrives.length})
+              </h3>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {completedDrives.map((drive: BloodDrive) => (
+                <div
+                  key={drive.id}
+                  className="bg-zinc-50/60 dark:bg-zinc-800/30 rounded-xl border border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 transition-colors overflow-hidden opacity-80"
+                >
+                  <div className="p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold border ${getStatusColor(drive.status)}`}>
+                        {getStatusIcon(drive.status)}
+                        {drive.status.charAt(0).toUpperCase() + drive.status.slice(1)}
+                      </span>
+                      <span className="text-[11px] text-zinc-400 dark:text-zinc-500">
+                        {new Date(drive.date).toLocaleDateString()}
+                      </span>
+                    </div>
+
+                    <h3 className="text-sm font-bold text-zinc-900 dark:text-white mb-1.5 line-clamp-1">
+                      {drive.title}
+                    </h3>
+
+                    <div className="flex items-start gap-1.5 text-xs text-zinc-500 dark:text-zinc-400 mb-2.5">
+                      <MapPinIcon className="w-3.5 h-3.5 text-zinc-400 flex-shrink-0 mt-0.5" />
+                      <span className="line-clamp-1">{drive.location}</span>
+                    </div>
+
+                    <div className="flex flex-wrap gap-1 mb-2.5">
+                      {drive.bloodTypesNeeded.slice(0, 3).map((type: string) => (
+                        <span
+                          key={type}
+                          className="px-1.5 py-0.5 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 text-[10px] font-semibold rounded"
+                        >
+                          {type}
+                        </span>
+                      ))}
+                      {drive.bloodTypesNeeded.length > 3 && (
+                        <span className="px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 text-[10px] font-semibold rounded">
+                          +{drive.bloodTypesNeeded.length - 3}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-3 divide-x divide-zinc-100 dark:divide-zinc-800 border border-zinc-100 dark:border-zinc-800 rounded-lg overflow-hidden">
+                      <div className="text-center py-1.5">
+                        <p className="text-[9px] font-semibold text-zinc-400 uppercase tracking-wide">Target</p>
+                        <p className="text-xs font-bold text-zinc-900 dark:text-white">{drive.targetDonors}</p>
+                      </div>
+                      <div className="text-center py-1.5">
+                        <p className="text-[9px] font-semibold text-teal-500 uppercase tracking-wide">Registered</p>
+                        <p className="text-xs font-bold text-teal-600 dark:text-teal-400">{drive.registeredDonors}</p>
+                      </div>
+                      <div className="text-center py-1.5">
+                        <p className="text-[9px] font-semibold text-emerald-500 uppercase tracking-wide">Donated</p>
+                        <p className="text-xs font-bold text-emerald-600 dark:text-emerald-400">{drive.completedDonations}</p>
+                      </div>
+                    </div>
+
+                    <div className="mt-3">
+                      <button
+                        onClick={() => openDetailsModal(drive)}
+                        className="w-full py-1.5 rounded-lg transition-colors font-semibold text-xs bg-zinc-50 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-700 flex items-center justify-center gap-1"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                        Details
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* No Results */}
         {filteredDrives.length === 0 && (
-          <div className="text-center py-12">
-            <Calendar className="h-16 w-16 text-zinc-300 dark:text-zinc-600 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-zinc-700 dark:text-zinc-300">No Blood Drives Available</h3>
-            <p className="text-zinc-500 dark:text-zinc-400 mt-1">
-              Check back later for upcoming blood drives in your area.
+          <div className="text-center py-10 border border-dashed border-zinc-200 dark:border-zinc-700 rounded-xl">
+            <div className="h-12 w-12 rounded-xl bg-red-50 dark:bg-red-950/20 flex items-center justify-center mx-auto mb-3">
+              <Calendar className="h-6 w-6 text-red-300 dark:text-red-800" strokeWidth={1.5} />
+            </div>
+            <h3 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+              No blood drives found
+            </h3>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 max-w-sm mx-auto">
+              {searchQuery 
+                ? 'Try adjusting your search or filter criteria.'
+                : filter === 'available'
+                ? 'There are no upcoming or ongoing blood drives right now — check back later.'
+                : 'No blood drives match your current filter.'}
             </p>
+            {totalRegisteredCount > 0 && (
+              <Link
+                href="/donors/blood-drives/registered"
+                className="inline-block mt-4 px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl transition-colors text-xs font-semibold"
+              >
+                View My Registrations ({totalRegisteredCount})
+              </Link>
+            )}
           </div>
         )}
       </div>

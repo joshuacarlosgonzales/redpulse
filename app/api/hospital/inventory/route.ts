@@ -1,9 +1,23 @@
-// app/api/hospital/inventory/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import dbConnect from '@/lib/mongodb'
 import mongoose from 'mongoose'
 import jwt from 'jsonwebtoken'
 import BloodInventory from '@/models/BloodInventory'
+
+// Shared logic for deriving the frontend-facing status from a raw inventory
+// document. Keeping this in one place means the GET list route and the
+// status filter always agree on what "available" / "low" / "critical" /
+// "expired" mean.
+function computeFrontendStatus(item: any): 'available' | 'low' | 'critical' | 'expired' {
+  const isExpired = new Date(item.expirationDate) < new Date()
+  if (isExpired) return 'expired'
+
+  const dbStatus = item.status?.toLowerCase() || 'sufficient'
+  if (dbStatus === 'out of stock' || item.units === 0) return 'critical'
+  if (dbStatus === 'critical') return 'critical'
+  if (dbStatus === 'low') return 'low'
+  return 'available'
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -18,9 +32,9 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authHeader.split(' ')[1]
-    
+
     let decoded: any;
-    
+
     try {
       decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret') as any
     } catch (jwtError) {
@@ -37,18 +51,36 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    console.log('👤 User ID:', decoded.userId)
-    console.log('👤 User Role:', decoded.role)
-
     const { searchParams } = new URL(request.url)
     const bloodType = searchParams.get('bloodType')
     const status = searchParams.get('status')
     const search = searchParams.get('search') || ''
+    const hospitalIdParam = searchParams.get('hospitalId')
 
-    // Build filter - use the userId from token as hospitalId
-    const filter: any = { hospitalId: new mongoose.Types.ObjectId(decoded.userId) }
+    // Real pagination support
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10) || 1)
+    const limit = Math.max(1, parseInt(searchParams.get('limit') || '10', 10) || 10)
+
+    // Build filter
+    const filter: any = {}
+
+    // Admins can see across hospitals (optionally scoped via ?hospitalId=),
+    // whereas hospital users are always scoped to their own hospitalId.
+    if (decoded.role === 'admin') {
+      if (hospitalIdParam) {
+        if (!mongoose.Types.ObjectId.isValid(hospitalIdParam)) {
+          return NextResponse.json(
+            { error: 'Invalid hospitalId format' },
+            { status: 400 }
+          )
+        }
+        filter.hospitalId = new mongoose.Types.ObjectId(hospitalIdParam)
+      }
+    } else {
+      filter.hospitalId = new mongoose.Types.ObjectId(decoded.userId)
+    }
+
     if (bloodType && bloodType !== 'all') filter.bloodType = bloodType
-    if (status && status !== 'all') filter.status = status
 
     if (search) {
       filter.$or = [
@@ -57,74 +89,66 @@ export async function GET(request: NextRequest) {
       ]
     }
 
-    console.log('🔍 Filter:', JSON.stringify(filter, null, 2))
-
+    // Note: `status` is intentionally NOT applied as a raw Mongo filter here.
+    // The DB's status field doesn't share the same vocabulary as the
+    // frontend's status ('available' | 'low' | 'critical' | 'expired'), and
+    // "expired" isn't a stored status at all - it's derived from
+    // expirationDate. So we fetch first, then filter using the same
+    // computeFrontendStatus() logic the response itself uses.
     const inventory = await BloodInventory.find(filter)
       .sort({ bloodType: 1 })
       .lean()
 
-    console.log('📦 Found inventory items:', inventory.length)
-    console.log('📦 Inventory data:', JSON.stringify(inventory, null, 2))
-
     // Transform data for frontend - Map units to quantity
-    const transformedInventory = inventory.map((item: any) => {
-      const isExpired = new Date(item.expirationDate) < new Date();
-      
-      // Map database status to frontend status
-      let frontendStatus = 'available';
-      if (isExpired) {
-        frontendStatus = 'expired';
-      } else {
-        const dbStatus = item.status?.toLowerCase() || 'sufficient';
-        if (dbStatus === 'out of stock' || item.units === 0) {
-          frontendStatus = 'critical';
-        } else if (dbStatus === 'critical') {
-          frontendStatus = 'critical';
-        } else if (dbStatus === 'low') {
-          frontendStatus = 'low';
-        } else {
-          frontendStatus = 'available';
-        }
-      }
+    const allTransformed = inventory.map((item: any) => ({
+      id: item._id.toString(),
+      bloodType: item.bloodType,
+      quantity: item.units || 0,
+      unit: 'units',
+      minThreshold: item.minRequired || 15,
+      maxThreshold: item.maxCapacity || 60,
+      status: computeFrontendStatus(item),
+      expiryDate: item.expirationDate,
+      location: item.notes || 'Main Storage',
+      hospitalId: item.hospitalId?.toString() || decoded.userId,
+      lastUpdated: item.updatedAt || item.createdAt,
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt
+    }))
 
-      return {
-        id: item._id.toString(),
-        bloodType: item.bloodType,
-        quantity: item.units || 0,
-        unit: 'units',
-        minThreshold: item.minRequired || 15,
-        maxThreshold: item.maxCapacity || 60,
-        status: frontendStatus,
-        expiryDate: item.expirationDate,
-        location: item.notes || 'Main Storage',
-        hospitalId: item.hospitalId?.toString() || decoded.userId,
-        lastUpdated: item.updatedAt || item.createdAt,
-        createdAt: item.createdAt,
-        updatedAt: item.updatedAt
-      }
-    })
-
-    console.log('📊 Transformed inventory:', JSON.stringify(transformedInventory, null, 2))
-
-    // Calculate stats
+    // Stats reflect the full filtered set (bloodType/search/hospital scope)
+    // regardless of the status filter, so summary cards stay accurate even
+    // when a status filter narrows the visible rows.
     const stats = {
-      totalUnits: transformedInventory.reduce((sum: number, item: any) => sum + item.quantity, 0),
-      availableUnits: transformedInventory
+      totalUnits: allTransformed.reduce((sum: number, item: any) => sum + item.quantity, 0),
+      availableUnits: allTransformed
         .filter((i: any) => i.status === 'available')
         .reduce((sum: number, item: any) => sum + item.quantity, 0),
-      lowStockCount: transformedInventory.filter((i: any) => i.status === 'low').length,
-      criticalCount: transformedInventory.filter((i: any) => i.status === 'critical').length,
+      lowStockCount: allTransformed.filter((i: any) => i.status === 'low').length,
+      criticalCount: allTransformed.filter((i: any) => i.status === 'critical').length,
     }
+
+    // Status filter now compares against the same derived status
+    // used everywhere else, instead of the unmatched raw DB field.
+    const statusFiltered = status && status !== 'all'
+      ? allTransformed.filter((i: any) => i.status === status)
+      : allTransformed
+
+    const total = statusFiltered.length
+    const totalPages = Math.max(1, Math.ceil(total / limit))
+    const currentPage = Math.min(page, totalPages)
+    const startIndex = (currentPage - 1) * limit
+    const pageItems = statusFiltered.slice(startIndex, startIndex + limit)
 
     return NextResponse.json({
       success: true,
-      data: transformedInventory,
+      data: pageItems,
       stats: stats,
       pagination: {
-        total: transformedInventory.length,
-        page: 1,
-        limit: transformedInventory.length,
-        totalPages: 1
+        total,
+        page: currentPage,
+        limit,
+        totalPages
       }
     })
 
@@ -150,9 +174,9 @@ export async function POST(request: NextRequest) {
     }
 
     const token = authHeader.split(' ')[1]
-    
+
     let decoded: any;
-    
+
     try {
       decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret') as any
     } catch (jwtError) {
@@ -170,9 +194,8 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    console.log('📥 Received inventory body:', JSON.stringify(body, null, 2))
 
-    const { bloodType, quantity, minThreshold, maxThreshold, expiryDate, location, notes } = body
+    const { bloodType, quantity, minThreshold, maxThreshold, expiryDate, location, notes, hospitalId: hospitalIdParam } = body
 
     if (!bloodType || quantity === undefined || !expiryDate) {
       return NextResponse.json(
@@ -181,10 +204,28 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Check if inventory already exists
+    // Admins may create/update stock on behalf of a specific
+    // hospital by passing hospitalId in the body. Hospital users are always
+    // scoped to their own account.
+    let targetHospitalId: mongoose.Types.ObjectId
+    if (decoded.role === 'admin') {
+      if (!hospitalIdParam || !mongoose.Types.ObjectId.isValid(hospitalIdParam)) {
+        return NextResponse.json(
+          { error: 'hospitalId is required and must be valid when creating inventory as an admin' },
+          { status: 400 }
+        )
+      }
+      targetHospitalId = new mongoose.Types.ObjectId(hospitalIdParam)
+    } else {
+      targetHospitalId = new mongoose.Types.ObjectId(decoded.userId)
+    }
+
+    // Only merge into an existing batch of the same blood type if
+    // that batch is NOT already expired.
     const existingInventory = await BloodInventory.findOne({
-      hospitalId: new mongoose.Types.ObjectId(decoded.userId),
-      bloodType: bloodType
+      hospitalId: targetHospitalId,
+      bloodType: bloodType,
+      expirationDate: { $gte: new Date() }
     })
 
     if (existingInventory) {
@@ -212,7 +253,7 @@ export async function POST(request: NextRequest) {
 
     // Create new inventory (status will be set by pre-save middleware)
     const newInventory = await BloodInventory.create({
-      hospitalId: new mongoose.Types.ObjectId(decoded.userId),
+      hospitalId: targetHospitalId,
       bloodType: bloodType,
       units: quantity,
       minRequired: minThreshold || 15,
@@ -220,8 +261,6 @@ export async function POST(request: NextRequest) {
       expirationDate: new Date(expiryDate),
       notes: notes || location || 'Added via inventory management'
     })
-
-    console.log(`✅ Inventory created: ${bloodType} ${quantity} units`)
 
     return NextResponse.json({
       success: true,

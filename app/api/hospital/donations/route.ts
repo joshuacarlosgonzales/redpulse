@@ -1,4 +1,5 @@
 // app/api/hospital/donations/route.ts
+
 import { NextRequest, NextResponse } from 'next/server'
 import dbConnect from '@/lib/mongodb'
 import mongoose from 'mongoose'
@@ -6,6 +7,12 @@ import jwt from 'jsonwebtoken'
 import Donation from '@/models/Donation'
 import BloodInventory from '@/models/BloodInventory'
 import User from '@/models/User'
+import Donor from '@/models/Donor'
+
+// Define valid status types
+type DonorStatus = 'active' | 'inactive' | 'pending' | 'rejected'
+type BackgroundCheckStatus = 'pending' | 'in-review' | 'cleared' | 'failed'
+type RegistrationType = 'walk-in' | 'system'
 
 export async function GET(request: NextRequest) {
   try {
@@ -20,9 +27,9 @@ export async function GET(request: NextRequest) {
     }
 
     const token = authHeader.split(' ')[1]
-    
+
     let decoded: any;
-    
+
     try {
       decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret') as any
     } catch (jwtError) {
@@ -47,14 +54,16 @@ export async function GET(request: NextRequest) {
     const page = parseInt(searchParams.get('page') || '1')
     const skip = (page - 1) * limit
 
-    // Use hospitalId from token
-    const filter: any = { 
-      hospitalId: new mongoose.Types.ObjectId(decoded.userId) 
-    }
+    // ✅ Use hospitalId from token
+    const hospitalObjectId = new mongoose.Types.ObjectId(decoded.userId)
     
+    const filter: any = {
+      hospitalId: hospitalObjectId
+    }
+
     if (status !== 'all') filter.status = status
     if (bloodType !== 'all') filter.bloodType = bloodType
-    
+
     if (search) {
       filter.$or = [
         { donorName: { $regex: search, $options: 'i' } },
@@ -84,8 +93,10 @@ export async function GET(request: NextRequest) {
       notes: donation.notes || '',
       status: donation.status || 'Pending',
       hospital: donation.hospital || 'Hospital',
+      isWalkIn: donation.isWalkIn || false,
       createdAt: donation.createdAt,
-      updatedAt: donation.updatedAt
+      updatedAt: donation.updatedAt,
+      expirationDate: donation.expirationDate || null
     }))
 
     return NextResponse.json({
@@ -121,9 +132,9 @@ export async function POST(request: NextRequest) {
     }
 
     const token = authHeader.split(' ')[1]
-    
+
     let decoded: any;
-    
+
     try {
       decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret') as any
     } catch (jwtError) {
@@ -159,7 +170,8 @@ export async function POST(request: NextRequest) {
       units,
       donationDate,
       notes,
-      status = 'Completed'
+      status = 'Completed',
+      isWalkIn = false
     } = body
 
     // Validation
@@ -191,66 +203,261 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Get hospital name
-    const hospitalName = user.hospitalName || user.fullName || 'Hospital'
+    // ============================================================
+    // ✅ GET HOSPITAL INFO
+    // ============================================================
 
-    // Parse donation date
+    const hospitalName = user.hospitalName || user.fullName || 'Hospital'
+    const hospitalEmail = user.email || 'Hospital Staff'
+    const hospitalObjectId = new mongoose.Types.ObjectId(decoded.userId)
+
+    console.log('🏥 Hospital Name:', hospitalName)
+    console.log('📧 Hospital Email:', hospitalEmail)
+
+    // ============================================================
+    // ✅ PARSE DATES
+    // ============================================================
+
     const donationDateObj = new Date(donationDate)
-    
-    // Calculate expiration date (42 days from donation date)
     const expirationDate = new Date(donationDateObj)
     expirationDate.setDate(expirationDate.getDate() + 42)
 
-    // Create donation with hospitalId
-    const donationData = {
-      donorId: new mongoose.Types.ObjectId(decoded.userId),
-      hospitalId: new mongoose.Types.ObjectId(decoded.userId), // CRITICAL: Add hospitalId
+    // ============================================================
+    // ✅ FIND OR CREATE DONOR PROFILE
+    // ============================================================
+
+    let donorProfile: any = null
+    let donorObjectId: mongoose.Types.ObjectId | null = null
+
+    // 1. First try to find donor by email in Donor collection
+    if (donorEmail && donorEmail.trim()) {
+      donorProfile = await Donor.findOne({
+        email: donorEmail.trim().toLowerCase()
+      })
+      if (donorProfile) {
+        console.log('✅ Found donor by email in Donor collection:', donorProfile._id)
+        donorObjectId = donorProfile._id
+      }
+    }
+
+    // 2. If not found by email, try by userId
+    if (!donorProfile) {
+      const matchedUser = await User.findOne({
+        email: donorEmail?.trim().toLowerCase(),
+        role: 'donor'
+      })
+      if (matchedUser) {
+        donorProfile = await Donor.findOne({
+          userId: matchedUser._id
+        })
+        if (donorProfile) {
+          console.log('✅ Found donor by userId:', donorProfile._id)
+          donorObjectId = donorProfile._id
+        } else {
+          // Create donor profile from user
+          const timestamp = Date.now().toString()
+          const donorData = {
+            fullName: donorName.trim(),
+            email: donorEmail?.trim() || `${donorName.replace(/\s/g, '').toLowerCase()}@donor.com`,
+            phone: donorPhone || 'N/A',
+            bloodType: bloodType,
+            address: 'Registered Donor',
+            barangay: 'Registered',
+            municipality: 'Registered',
+            province: 'Registered',
+            dateOfBirth: new Date('2000-01-01'),
+            gender: 'Other' as 'Other',
+            weight: 50,
+            status: 'active' as DonorStatus,
+            isEligible: true,
+            totalDonations: 0,
+            lastDonationDate: null,
+            nextEligibleDate: null,
+            digitalId: `DONOR-${timestamp.slice(-8)}`,
+            userId: matchedUser._id,
+            isWalkIn: false,
+            // ✅ FIX: Use 'system' (valid)
+            registrationType: 'system' as RegistrationType,
+            hospitalName: hospitalName,
+            backgroundCheckStatus: 'cleared' as BackgroundCheckStatus,
+            backgroundCheckDate: new Date(),
+            backgroundCheckNotes: 'Registered donor',
+            verifiedBy: hospitalEmail,
+            verificationDate: new Date(),
+            approvedBy: hospitalEmail,
+            approvedAt: new Date(),
+            emergencyContact: donorPhone || 'N/A',
+            emergencyName: 'N/A',
+            emergencyRelationship: 'Self',
+          }
+          donorProfile = await Donor.create(donorData)
+          console.log('✅ Created donor profile from user:', donorProfile._id)
+          donorObjectId = donorProfile._id
+        }
+      }
+    }
+
+    // 3. If still not found, create a new donor (walk-in)
+    if (!donorProfile) {
+      console.log('📝 Creating new walk-in donor profile...')
+      
+      const email = donorEmail?.trim() || `${donorName.replace(/\s/g, '').toLowerCase()}@walkin.com`
+      let uniqueEmail = email
+      let counter = 0
+      
+      while (true) {
+        const existing = await Donor.findOne({ email: uniqueEmail })
+        if (!existing) break
+        counter++
+        const namePart = donorName.replace(/\s/g, '').toLowerCase()
+        uniqueEmail = `${namePart}${counter}@walkin.com`
+        if (counter > 100) {
+          uniqueEmail = `walkin_${Date.now()}@walkin.com`
+          break
+        }
+      }
+
+      const timestamp = Date.now().toString()
+      const digitalId = `WALKIN-${timestamp.slice(-8)}${String.fromCharCode(65 + Math.floor(Math.random() * 26))}`
+
+      const donorData = {
+        fullName: donorName.trim(),
+        email: uniqueEmail,
+        phone: donorPhone || 'N/A',
+        bloodType: bloodType,
+        address: 'Walk-in Donor',
+        barangay: 'Walk-in',
+        municipality: 'Walk-in',
+        province: 'Walk-in',
+        dateOfBirth: new Date('2000-01-01'),
+        gender: 'Other' as 'Other',
+        weight: 50,
+        status: 'active' as DonorStatus,
+        isEligible: true,
+        totalDonations: 0,
+        lastDonationDate: null,
+        nextEligibleDate: null,
+        digitalId: digitalId,
+        userId: null,
+        isWalkIn: true,
+        // ✅ FIX: Use 'walk-in' (valid)
+        registrationType: 'walk-in' as RegistrationType,
+        hospitalName: hospitalName,
+        backgroundCheckStatus: 'cleared' as BackgroundCheckStatus,
+        backgroundCheckDate: new Date(),
+        backgroundCheckNotes: 'Walk-in donor - automatically approved',
+        verifiedBy: hospitalEmail,
+        verificationDate: new Date(),
+        approvedBy: hospitalEmail,
+        approvedAt: new Date(),
+        emergencyContact: donorPhone || 'N/A',
+        emergencyName: 'N/A',
+        emergencyRelationship: 'Self',
+      }
+
+      donorProfile = await Donor.create(donorData)
+      console.log('✅ Created walk-in donor:', donorProfile._id)
+      donorObjectId = donorProfile._id
+    }
+
+    // ============================================================
+    // ✅ CREATE DONATION
+    // ============================================================
+
+    const donationData: any = {
+      hospitalId: hospitalObjectId,
+      donorId: donorObjectId || hospitalObjectId,
       donorName: donorName.trim(),
       donorEmail: donorEmail || '',
       donorPhone: donorPhone || '',
       bloodType: bloodType,
       units: units,
       date: donationDateObj,
-      status: status,
+      status: status as 'Completed' | 'Pending' | 'Scheduled' | 'Cancelled',
       hospital: hospitalName,
       notes: notes || '',
+      isWalkIn: donorProfile?.isWalkIn || isWalkIn || false,
+      expirationDate: expirationDate,
+    }
+
+    // ✅ Only add registrationType if the Donation model has this field
+    // Check if the field exists in the schema
+    if (donorProfile?.registrationType) {
+      // Some models might not have this field, so we'll add it safely
+      try {
+        donationData.registrationType = donorProfile.registrationType
+      } catch (e) {
+        console.warn('⚠️ registrationType field not supported in Donation model')
+      }
     }
 
     const donation = await Donation.create(donationData)
     console.log(`✅ Donation created: ${donorName} donated ${units} units of ${bloodType}`)
 
-    // UPDATE INVENTORY - Only if donation is completed
+    // ============================================================
+    // ✅ UPDATE DONOR PROFILE
+    // ============================================================
+
+    if (donorProfile) {
+      donorProfile.lastDonationDate = donationDateObj
+      donorProfile.totalDonations = (donorProfile.totalDonations || 0) + 1
+
+      const nextEligibleDate = new Date(donationDateObj)
+      nextEligibleDate.setMonth(nextEligibleDate.getMonth() + 3)
+      donorProfile.nextEligibleDate = nextEligibleDate
+      donorProfile.isEligible = false
+      await donorProfile.save()
+      console.log('✅ Donor profile updated')
+    }
+
+    // ============================================================
+    // ✅ UPDATE INVENTORY - Only if donation is completed
+    // ============================================================
+
     let inventoryUpdated = false
+    let inventoryData = null
+
     if (status === 'Completed') {
       try {
-        // Find existing inventory
         let inventory = await BloodInventory.findOne({
-          hospitalId: new mongoose.Types.ObjectId(decoded.userId),
+          hospitalId: hospitalObjectId,
           bloodType: bloodType
         })
 
+        console.log(`🔍 Looking for inventory: hospitalId=${hospitalObjectId}, bloodType=${bloodType}`)
+
         if (inventory) {
-          // Update existing inventory
+          const oldUnits = inventory.units
           inventory.units += units
-          
-          // Update expiration date if this donation has a later expiration
-          if (expirationDate > inventory.expirationDate) {
+
+          if (expirationDate < inventory.expirationDate) {
             inventory.expirationDate = expirationDate
           }
-          
-          // Update notes with donation history
+
           const donationNote = `+${units} units from ${donorName} on ${donationDateObj.toLocaleDateString()}`
-          inventory.notes = inventory.notes 
+          inventory.notes = inventory.notes
             ? `${inventory.notes} | ${donationNote}`
             : donationNote
-          
+
+          // Update status
+          const minRequired = Number(inventory.minRequired || 15)
+          if (inventory.units <= 0) {
+            inventory.status = 'out of stock'
+          } else if (inventory.units < minRequired) {
+            inventory.status = 'critical'
+          } else if (inventory.units < minRequired * 2) {
+            inventory.status = 'low'
+          } else {
+            inventory.status = 'sufficient'
+          }
+
           await inventory.save()
           inventoryUpdated = true
-          console.log(`📦 Inventory updated: ${bloodType} now has ${inventory.units} units (${inventory.status})`)
+          inventoryData = inventory
+          console.log(`📦 Inventory updated: ${bloodType} from ${oldUnits} to ${inventory.units} units (${inventory.status})`)
         } else {
-          // Create new inventory
-          await BloodInventory.create({
-            hospitalId: new mongoose.Types.ObjectId(decoded.userId),
+          const newInventory = await BloodInventory.create({
+            hospitalId: hospitalObjectId,
             bloodType: bloodType,
             units: units,
             minRequired: 15,
@@ -260,29 +467,48 @@ export async function POST(request: NextRequest) {
             batchNumber: `DONATION-${Date.now()}`
           })
           inventoryUpdated = true
+          inventoryData = newInventory
           console.log(`📦 New inventory created for ${bloodType}: ${units} units, expires on ${expirationDate.toLocaleDateString()}`)
         }
       } catch (inventoryError) {
         console.error('❌ Error updating inventory:', inventoryError)
-        // Don't fail the donation if inventory update fails
       }
+    }
+
+    // ============================================================
+    // ✅ RESPONSE
+    // ============================================================
+
+    const responseData: any = {
+      id: donation._id.toString(),
+      donorId: donation.donorId?.toString() || '',
+      donorName: donation.donorName,
+      bloodType: donation.bloodType,
+      units: donation.units,
+      status: donation.status,
+      donationDate: donation.date,
+      hospital: donation.hospital,
+      expirationDate: status === 'Completed' ? expirationDate : null,
+      inventoryUpdated: inventoryUpdated,
+      isWalkIn: donation.isWalkIn || false,
+      inventory: inventoryData ? {
+        id: inventoryData._id.toString(),
+        bloodType: inventoryData.bloodType,
+        units: inventoryData.units,
+        status: inventoryData.status
+      } : null
+    }
+
+    // Only add registrationType if it exists on the donation
+    if ((donation as any).registrationType) {
+      responseData.registrationType = (donation as any).registrationType
     }
 
     return NextResponse.json({
       success: true,
-      data: {
-        id: donation._id.toString(),
-        donorName: donation.donorName,
-        bloodType: donation.bloodType,
-        units: donation.units,
-        status: donation.status,
-        donationDate: donation.date,
-        hospital: donation.hospital,
-        expirationDate: status === 'Completed' ? expirationDate : null,
-        inventoryUpdated: inventoryUpdated
-      },
+      data: responseData,
       message: status === 'Completed' && inventoryUpdated
-        ? 'Donation recorded and inventory updated successfully! 🩸' 
+        ? 'Donation recorded and inventory updated successfully! 🩸'
         : status === 'Completed' && !inventoryUpdated
         ? 'Donation recorded but inventory update failed. Please sync manually.'
         : 'Donation recorded successfully!'
@@ -310,9 +536,9 @@ export async function DELETE(request: NextRequest) {
     }
 
     const token = authHeader.split(' ')[1]
-    
+
     let decoded: any;
-    
+
     try {
       decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret') as any
     } catch (jwtError) {
@@ -346,9 +572,11 @@ export async function DELETE(request: NextRequest) {
       )
     }
 
+    const hospitalObjectId = new mongoose.Types.ObjectId(decoded.userId)
+
     const donation = await Donation.findOne({
       _id: donationId,
-      hospitalId: new mongoose.Types.ObjectId(decoded.userId)
+      hospitalId: hospitalObjectId
     })
 
     if (!donation) {
@@ -358,10 +586,9 @@ export async function DELETE(request: NextRequest) {
       )
     }
 
-    // Update inventory if donation was completed
     if (donation.status === 'Completed') {
       const inventory = await BloodInventory.findOne({
-        hospitalId: new mongoose.Types.ObjectId(decoded.userId),
+        hospitalId: hospitalObjectId,
         bloodType: donation.bloodType
       })
 

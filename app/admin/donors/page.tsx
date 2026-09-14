@@ -1,3 +1,4 @@
+// app/admin/donors/page.tsx
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
@@ -28,7 +29,11 @@ import {
   User,
   Bell,
   Send,
-  Info
+  Info,
+  UserPlus,
+  UserCog,
+  RefreshCw,
+  Inbox,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
@@ -65,6 +70,8 @@ interface Donor {
   points?: number;
   emergencyName?: string;
   emergencyRelationship?: string;
+  registrationType?: "walk-in" | "system";
+  isWalkIn?: boolean;
 }
 
 const bloodTypes = ["All", "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
@@ -77,6 +84,7 @@ export default function AdminDonorsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [bloodTypeFilter, setBloodTypeFilter] = useState("all");
+  const [activeTab, setActiveTab] = useState<'all' | 'system' | 'walk-in'>('all');
   const [selectedDonor, setSelectedDonor] = useState<Donor | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
@@ -85,11 +93,22 @@ export default function AdminDonorsPage() {
   const [showNotifyModal, setShowNotifyModal] = useState<string | null>(null);
   const [notificationMessage, setNotificationMessage] = useState("");
   const [notificationSubject, setNotificationSubject] = useState("");
+  const [notificationType, setNotificationType] = useState("info");
+  const [notificationSent, setNotificationSent] = useState(false);
   const [pagination, setPagination] = useState({
     total: 0,
     page: 1,
-    limit: 10,
+    limit: 8,
     totalPages: 0,
+  });
+  
+  // ============ ADDED: Store total counts separately ============
+  const [totalCounts, setTotalCounts] = useState({
+    totalDonors: 0,
+    systemDonors: 0,
+    walkInDonors: 0,
+    pendingDonors: 0,
+    activeDonors: 0,
   });
 
   const fetchDonors = useCallback(async () => {
@@ -106,16 +125,17 @@ export default function AdminDonorsPage() {
 
       const params = new URLSearchParams();
       if (searchQuery) params.append('search', searchQuery);
+      if (statusFilter !== 'all') params.append('status', statusFilter);
+      if (bloodTypeFilter !== 'all') params.append('bloodType', bloodTypeFilter);
       
-      if (statusFilter !== 'all') {
-        params.append('status', statusFilter);
+      if (activeTab === 'system') {
+        params.append('registrationType', 'system');
+      } else if (activeTab === 'walk-in') {
+        params.append('registrationType', 'walk-in');
       }
       
-      if (bloodTypeFilter !== 'all') params.append('bloodType', bloodTypeFilter);
       params.append('page', pagination.page.toString());
       params.append('limit', pagination.limit.toString());
-
-      console.log('🔍 Fetching donors with params:', params.toString());
 
       const response = await fetch(`/api/admin/donors?${params.toString()}`, {
         headers: {
@@ -136,47 +156,91 @@ export default function AdminDonorsPage() {
       }
 
       const data = await response.json();
-      console.log('📦 Fetched donors data:', JSON.stringify(data, null, 2));
       
-      // Ensure each donor has the correct id
       const donorsWithIds = (data.donors || []).map((donor: any) => {
         const donorId = donor.id || donor._id;
-        console.log(`📌 Donor: ${donor.fullName}, ID: ${donorId}, _id: ${donor._id}, userId: ${donor.userId}`);
         return {
           ...donor,
           id: donorId,
           _id: donor._id || donorId,
-          userId: donor.userId || ''
+          userId: donor.userId || '',
+          registrationType: donor.registrationType || 'system',
+          isWalkIn: donor.registrationType === 'walk-in',
         };
       });
       
       setDonors(donorsWithIds);
-      setPagination(data.pagination || { total: 0, page: 1, limit: 10, totalPages: 0 });
+      setPagination(data.pagination || { total: 0, page: 1, limit: 8, totalPages: 0 });
+      
+      // ============ UPDATE: Calculate total counts from ALL donors ============
+      // We need to fetch ALL donors to get accurate counts, or we can use the pagination total
+      // For now, we'll calculate from the current donors list but only if we're on 'all' tab
+      // A better approach: fetch total counts from a separate API or use the pagination.total
+      
+      // Since pagination.total is the total number of donors (all types), we use that
+      // For system/walk-in breakdown, we need to calculate from the current donors
+      // But since we're on the 'all' tab when counts are calculated, we can use that
+      
     } catch (err) {
       console.error('❌ Error fetching donors:', err);
       setError(err instanceof Error ? err.message : 'Failed to load donors. Please try again.');
     } finally {
       setLoading(false);
     }
-  }, [searchQuery, statusFilter, bloodTypeFilter, pagination.page, router]);
+  }, [searchQuery, statusFilter, bloodTypeFilter, activeTab, pagination.page, router]);
+
+  // ============ ADDED: Fetch total counts separately ============
+  const fetchTotalCounts = useCallback(async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+
+      // Fetch all donors (first page only) to calculate counts
+      const params = new URLSearchParams();
+      params.append('page', '1');
+      params.append('limit', '100'); // Fetch more to get all counts
+
+      const response = await fetch(`/api/admin/donors?${params.toString()}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const allDonors = data.donors || [];
+        
+        const systemCount = allDonors.filter((d: any) => d.registrationType === 'system' || (!d.registrationType && !d.isWalkIn)).length;
+        const walkInCount = allDonors.filter((d: any) => d.registrationType === 'walk-in' || d.isWalkIn === true).length;
+        const pendingCount = allDonors.filter((d: any) => d.status === 'pending').length;
+        const activeCount = allDonors.filter((d: any) => d.status === 'active' || d.status === 'approved').length;
+        
+        setTotalCounts({
+          totalDonors: data.pagination?.total || allDonors.length,
+          systemDonors: systemCount,
+          walkInDonors: walkInCount,
+          pendingDonors: pendingCount,
+          activeDonors: activeCount,
+        });
+      }
+    } catch (err) {
+      console.error('Failed to fetch total counts:', err);
+    }
+  }, []);
 
   useEffect(() => {
     fetchDonors();
   }, [fetchDonors]);
 
+  // ============ ADDED: Fetch total counts when component mounts ============
+  useEffect(() => {
+    fetchTotalCounts();
+  }, []);
+
   // ============ HANDLER FUNCTIONS ============
   
   const handleApprove = async (donorId: string) => {
-    console.log('🟢 ====== APPROVE DONOR ======');
-    console.log('🟢 Donor ID received:', donorId);
-    console.log('🟢 Type of ID:', typeof donorId);
-    console.log('🟢 All donors in state:', donors.map(d => ({ 
-      id: d.id, 
-      name: d.fullName,
-      userId: d.userId,
-      _id: d._id
-    })));
-    
     try {
       setProcessingId(donorId);
       
@@ -187,25 +251,13 @@ export default function AdminDonorsPage() {
         return;
       }
 
-      // Find the donor by ID
       const donor = donors.find(d => d.id === donorId);
-      console.log('🟢 Found donor:', donor);
-      
       if (!donor) {
-        console.error('❌ Donor not found in state. Available IDs:', donors.map(d => d.id));
         alert('Donor not found. Please refresh the page and try again.');
         setProcessingId(null);
         return;
       }
 
-      console.log('✅ Sending approval request for:', {
-        donorId: donorId,
-        donorName: donor.fullName,
-        donorEmail: donor.email,
-        donorStatus: donor.status
-      });
-
-      // ✅ FIXED: Use dynamic route instead of static
       const response = await fetch(`/api/admin/donors/${donorId}/approve`, {
         method: 'POST',
         headers: {
@@ -213,16 +265,13 @@ export default function AdminDonorsPage() {
           'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
-          action: 'approve'  // Removed donorId from body, now in URL
+          action: 'approve'
         })
       });
-
-      console.log('🟢 Response status:', response.status);
 
       let data;
       try {
         const text = await response.text();
-        console.log('🟢 Raw response:', text);
         data = JSON.parse(text);
       } catch (parseError) {
         console.error('Failed to parse response:', parseError);
@@ -233,7 +282,6 @@ export default function AdminDonorsPage() {
         throw new Error(data.error || 'Failed to approve donor');
       }
 
-      // Update local state
       setDonors(prev => prev.map(d => 
         d.id === donorId 
           ? { 
@@ -245,8 +293,11 @@ export default function AdminDonorsPage() {
           : d
       ));
 
-      alert('✅ Donor approved successfully!');
+      await sendNotification(donor, 'approved', 'success');
+      
+      alert('✅ Donor approved successfully! Email and in-app notification sent.');
       await fetchDonors();
+      await fetchTotalCounts(); // Refresh counts
 
     } catch (error: any) {
       console.error('❌ Error approving donor:', error);
@@ -256,10 +307,223 @@ export default function AdminDonorsPage() {
     }
   };
 
+  const sendNotification = async (donor: Donor, type: string, notificationType: string = 'info') => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+
+      const templates: Record<string, { subject: string; message: string }> = {
+        approved: {
+          subject: `✅ Application Approved - Welcome to RedPulse!`,
+          message: `Dear {donor_name},
+
+We are pleased to inform you that your blood donor application has been APPROVED! 🎉
+
+You are now officially part of the RedPulse Blood Donation family. Your willingness to donate blood can save lives and make a real difference in our community.
+
+📋 Your Details:
+• Blood Type: {blood_type}
+• Donor ID: {donor_id}
+• Status: Active Donor
+
+📝 Next Steps:
+1. Complete your profile
+2. View available blood drives
+3. Register for a blood drive
+4. Donate & save lives
+
+Thank you for your commitment to saving lives!
+
+Best regards,
+RedPulse Blood Donation Team`
+        },
+        eligibility: {
+          subject: `🩸 You're Eligible to Donate Blood`,
+          message: `Dear {donor_name},
+
+We are pleased to inform you that you are ELIGIBLE to donate blood! 🩸
+
+Your next donation can help save up to 3 lives. We appreciate your continued commitment to our cause.
+
+📋 Your Details:
+• Blood Type: {blood_type}
+• Next Eligible Date: {next_eligible}
+• Total Donations: {total_donations}
+
+Please schedule your donation at your earliest convenience.
+
+Thank you for being a valued RedPulse donor!
+
+Best regards,
+RedPulse Blood Donation Team`
+        },
+        reminder: {
+          subject: `🔔 Donation Reminder`,
+          message: `Dear {donor_name},
+
+This is a friendly reminder that you are eligible to donate blood.
+
+🩸 Blood Type: {blood_type}
+📅 Next Eligible: {next_eligible}
+
+Every donation can save up to 3 lives. Please visit your nearest blood donation center or schedule an appointment through our system.
+
+Thank you for your continued support!
+
+Best regards,
+RedPulse Blood Donation Team`
+        },
+        thank_you: {
+          subject: `❤️ Thank You for Your Donation!`,
+          message: `Dear {donor_name},
+
+Thank you so much for your recent blood donation! ❤️
+
+Your generosity has helped save lives in our community. We are incredibly grateful for your commitment to this life-saving cause.
+
+📋 Donation Details:
+• Blood Type: {blood_type}
+• Total Donations: {total_donations}
+• Points Earned: 100 points
+
+You are making a real difference. Thank you for being a hero!
+
+With gratitude,
+RedPulse Blood Donation Team`
+        },
+        schedule: {
+          subject: `📅 Schedule Your Next Donation`,
+          message: `Dear {donor_name},
+
+We invite you to schedule your next blood donation appointment.
+
+🩸 Blood Type: {blood_type}
+📍 Location: {location}
+
+Please visit our platform to schedule your appointment at your convenience.
+
+Thank you for your continued support!
+
+Best regards,
+RedPulse Blood Donation Team`
+        }
+      };
+
+      const template = templates[type] || templates.eligibility;
+
+      const response = await fetch('/api/admin/donors/notifications', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          donorId: donor.id,
+          subject: template.subject,
+          message: template.message,
+          donorEmail: donor.email,
+          donorName: donor.fullName,
+          type: notificationType,
+          emailTemplate: type,
+          sendEmail: true
+        })
+      });
+
+      if (response.ok) {
+        console.log(`✅ ${type} notification sent to ${donor.email}`);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('❌ Notification failed:', error);
+      return false;
+    }
+  };
+
+  const handleSendEmailAndInAppNotification = async (donorId: string) => {
+    if (!notificationSubject.trim() || !notificationMessage.trim()) {
+      alert('Please fill in both subject and message');
+      return;
+    }
+
+    try {
+      setProcessingId(donorId);
+      setNotificationSent(false);
+      
+      const token = localStorage.getItem('token');
+      if (!token) {
+        alert('Please login again');
+        router.push('/auth/login');
+        return;
+      }
+
+      const donor = donors.find(d => d.id === donorId);
+      if (!donor) {
+        alert('Donor not found. Please refresh the page and try again.');
+        setProcessingId(null);
+        return;
+      }
+
+      const processedMessage = notificationMessage
+        .replace(/{donor_name}/g, donor.fullName)
+        .replace(/{blood_type}/g, donor.bloodType)
+        .replace(/{donor_id}/g, donor.digitalId || donor.id)
+        .replace(/{next_eligible}/g, donor.nextEligible || 'Not set')
+        .replace(/{total_donations}/g, donor.totalDonations?.toString() || '0')
+        .replace(/{location}/g, donor.location || donor.address || donor.barangay || 'Not specified');
+
+      const processedSubject = notificationSubject
+        .replace(/{donor_name}/g, donor.fullName)
+        .replace(/{blood_type}/g, donor.bloodType);
+
+      const response = await fetch('/api/admin/donors/notifications', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          donorId: donorId,
+          subject: processedSubject,
+          message: processedMessage,
+          donorEmail: donor.email,
+          donorName: donor.fullName,
+          type: notificationType,
+          emailTemplate: 'custom',
+          sendEmail: true
+        })
+      });
+
+      let data;
+      try {
+        data = await response.json();
+      } catch (parseError) {
+        console.error('Failed to parse response:', parseError);
+        throw new Error('Server returned an invalid response');
+      }
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to send notification');
+      }
+
+      setShowNotifyModal(null);
+      setNotificationSubject('');
+      setNotificationMessage('');
+      setNotificationSent(true);
+      
+      alert('✅ Email and in-app notification sent successfully!');
+      
+      setTimeout(() => setNotificationSent(false), 3000);
+
+    } catch (error: any) {
+      console.error('❌ Error sending notification:', error);
+      alert(error.message || 'Failed to send notification. Please try again.');
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
   const handleReject = async (donorId: string) => {
-    console.log('🔴 ====== REJECT DONOR ======');
-    console.log('🔴 Donor ID received:', donorId);
-    
     if (!rejectionReason.trim()) {
       alert('Please provide a reason for rejection');
       return;
@@ -277,18 +541,11 @@ export default function AdminDonorsPage() {
 
       const donor = donors.find(d => d.id === donorId);
       if (!donor) {
-        console.error('❌ Donor not found with ID:', donorId);
         alert('Donor not found. Please refresh the page and try again.');
         setProcessingId(null);
         return;
       }
 
-      console.log('❌ Rejecting donor:', {
-        donorId: donorId,
-        donorName: donor.fullName
-      });
-
-      // ✅ FIXED: Use dynamic route instead of static
       const response = await fetch(`/api/admin/donors/${donorId}/approve`, {
         method: 'POST',
         headers: {
@@ -296,7 +553,7 @@ export default function AdminDonorsPage() {
           'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
-          action: 'reject',  // Removed donorId from body, now in URL
+          action: 'reject',
           reason: rejectionReason
         })
       });
@@ -321,8 +578,12 @@ export default function AdminDonorsPage() {
 
       setShowRejectModal(null);
       setRejectionReason('');
-      alert('❌ Donor rejected');
+
+      await sendNotification(donor, 'rejected', 'error');
+      
+      alert('❌ Donor rejected. Email and in-app notification sent.');
       await fetchDonors();
+      await fetchTotalCounts(); // Refresh counts
 
     } catch (error: any) {
       console.error('❌ Error rejecting donor:', error);
@@ -332,82 +593,109 @@ export default function AdminDonorsPage() {
     }
   };
 
-  const handleSendNotification = async (donorId: string) => {
-    console.log('🔔 ====== SEND NOTIFICATION ======');
-    console.log('🔔 Donor ID received:', donorId);
-    
-    if (!notificationSubject.trim() || !notificationMessage.trim()) {
-      alert('Please fill in both subject and message');
-      return;
-    }
+  const loadNotificationTemplate = (type: string, donor?: Donor) => {
+    const donorName = donor?.fullName || '{donor_name}';
+    const bloodType = donor?.bloodType || '{blood_type}';
+    const donorId = donor?.digitalId || donor?.id || '{donor_id}';
+    const totalDonations = donor?.totalDonations?.toString() || '{total_donations}';
+    const location = donor?.address || donor?.barangay || '{location}';
+    const nextEligible = donor?.nextEligible || '{next_eligible}';
 
-    try {
-      setProcessingId(donorId);
-      
-      const token = localStorage.getItem('token');
-      if (!token) {
-        alert('Please login again');
-        router.push('/auth/login');
-        return;
+    const templates: Record<string, { subject: string; message: string }> = {
+      info: {
+        subject: `📢 Announcement from RedPulse`,
+        message: `Dear ${donorName},
+
+We have an important announcement regarding the upcoming blood donation drive.
+
+📅 Date: Coming Soon
+📍 Location: ${location}
+
+Stay tuned for more details!
+
+Best regards,
+RedPulse Blood Donation Team`
+      },
+      success: {
+        subject: `✅ Your Donation Was Successful!`,
+        message: `Dear ${donorName},
+
+Your recent blood donation was a success! ❤️
+
+Thank you for your generosity. You've helped save lives in our community.
+
+📋 Details:
+• Blood Type: ${bloodType}
+• Total Donations: ${totalDonations}
+
+Best regards,
+RedPulse Blood Donation Team`
+      },
+      warning: {
+        subject: `⚠️ Important: Donation Eligibility Update`,
+        message: `Dear ${donorName},
+
+We wanted to inform you about an update regarding your donation eligibility.
+
+Please log in to your account to view the details and take any necessary actions.
+
+Best regards,
+RedPulse Blood Donation Team`
+      },
+      reminder: {
+        subject: `🔔 Donation Reminder`,
+        message: `Dear ${donorName},
+
+This is a friendly reminder that you are eligible to donate blood.
+
+🩸 Blood Type: ${bloodType}
+📅 Next Eligible: ${nextEligible}
+
+Every donation can save up to 3 lives.
+
+Thank you for your continued support!
+
+Best regards,
+RedPulse Blood Donation Team`
+      },
+      thank_you: {
+        subject: `❤️ Thank You for Your Donation!`,
+        message: `Dear ${donorName},
+
+Thank you so much for your recent blood donation! ❤️
+
+Your generosity has helped save lives in our community.
+
+📋 Details:
+• Blood Type: ${bloodType}
+• Total Donations: ${totalDonations}
+
+You are making a real difference!
+
+Best regards,
+RedPulse Blood Donation Team`
+      },
+      schedule: {
+        subject: `📅 Schedule Your Next Donation`,
+        message: `Dear ${donorName},
+
+We invite you to schedule your next blood donation appointment.
+
+🩸 Blood Type: ${bloodType}
+📍 Location: ${location}
+
+Please visit our platform to schedule your appointment.
+
+Best regards,
+RedPulse Blood Donation Team`
       }
+    };
 
-      // Find the donor by ID
-      const donor = donors.find(d => d.id === donorId);
-      if (!donor) {
-        console.error('❌ Donor not found with ID:', donorId);
-        alert('Donor not found. Please refresh the page and try again.');
-        setProcessingId(null);
-        return;
-      }
-
-      console.log('🔔 Sending notification to donor:', {
-        donorId: donorId,
-        donorName: donor.fullName,
-        donorEmail: donor.email
-      });
-
-      const response = await fetch('/api/admin/donors/notifications', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          donorId: donorId,
-          subject: notificationSubject,
-          message: notificationMessage,
-          donorEmail: donor.email,
-          donorName: donor.fullName,
-          type: notificationSubject.toLowerCase().includes('eligible') ? 'success' : 'info'
-        })
-      });
-
-      let data;
-      try {
-        data = await response.json();
-      } catch (parseError) {
-        console.error('Failed to parse response:', parseError);
-        throw new Error('Server returned an invalid response');
-      }
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to send notification');
-      }
-
-      setShowNotifyModal(null);
-      setNotificationSubject('');
-      setNotificationMessage('');
-      alert('✅ Notification sent successfully!');
-
-    } catch (error: any) {
-      console.error('❌ Error sending notification:', error);
-      alert(error.message || 'Failed to send notification. Please try again.');
-    } finally {
-      setProcessingId(null);
-    }
+    const template = templates[type] || templates.info;
+    setNotificationSubject(template.subject);
+    setNotificationMessage(template.message);
+    setNotificationType(type);
   };
-
-  // ============ HELPER FUNCTIONS ============
 
   const getStatusColor = (status: string) => {
     const statusMap: Record<string, string> = {
@@ -439,8 +727,6 @@ export default function AdminDonorsPage() {
       .toUpperCase();
   };
 
-  // ============ LOADING & ERROR STATES ============
-
   if (loading && donors.length === 0) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -469,8 +755,6 @@ export default function AdminDonorsPage() {
     );
   }
 
-  // ============ RENDER ============
-
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -478,47 +762,130 @@ export default function AdminDonorsPage() {
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold text-zinc-900 dark:text-white flex items-center gap-3">
             <Users className="w-8 h-8 text-red-500" />
-            Donor Approvals
+            Donor Management
           </h1>
           <p className="text-sm sm:text-base text-zinc-500 dark:text-zinc-400 mt-1">
-            Review and approve donor registrations from the community
+            Manage all donors - system registered and walk-in
           </p>
         </div>
         
         <div className="flex items-center gap-3">
+          <button
+            onClick={() => {
+              fetchDonors();
+              fetchTotalCounts();
+            }}
+            className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition"
+            title="Refresh"
+          >
+            <RefreshCw className="w-5 h-5 text-zinc-500" />
+          </button>
           <div className="flex items-center gap-2 bg-amber-50 dark:bg-amber-950/20 px-4 py-2 rounded-xl border border-amber-200 dark:border-amber-800/30">
             <Clock className="w-4 h-4 text-amber-600 dark:text-amber-400" />
             <span className="text-sm font-medium text-amber-700 dark:text-amber-400">
-              {donors.filter(d => d.status === 'pending').length} Pending
+              {totalCounts.pendingDonors} Pending
             </span>
           </div>
         </div>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+      {/* Stats with separated counts - USING TOTAL COUNTS NOT FILTERED DONORS */}
+      <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
         <div className="bg-white dark:bg-zinc-900 rounded-2xl p-4 shadow-sm border border-zinc-200/60 dark:border-zinc-800/60">
-          <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">Total Registrations</p>
-          <p className="text-2xl font-bold text-zinc-900 dark:text-white mt-1">{pagination.total}</p>
+          <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">Total Donors</p>
+          <p className="text-2xl font-bold text-zinc-900 dark:text-white mt-1">{totalCounts.totalDonors}</p>
         </div>
         <div className="bg-white dark:bg-zinc-900 rounded-2xl p-4 shadow-sm border border-zinc-200/60 dark:border-zinc-800/60">
           <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">Pending Approval</p>
           <p className="text-2xl font-bold text-amber-600 dark:text-amber-400 mt-1">
-            {donors.filter(d => d.status === 'pending').length}
+            {totalCounts.pendingDonors}
           </p>
         </div>
         <div className="bg-white dark:bg-zinc-900 rounded-2xl p-4 shadow-sm border border-zinc-200/60 dark:border-zinc-800/60">
-          <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">Approved</p>
+          <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">Active</p>
           <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">
-            {donors.filter(d => d.status === 'active' || d.status === 'approved').length}
+            {totalCounts.activeDonors}
           </p>
         </div>
         <div className="bg-white dark:bg-zinc-900 rounded-2xl p-4 shadow-sm border border-zinc-200/60 dark:border-zinc-800/60">
-          <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">Rejected</p>
-          <p className="text-2xl font-bold text-red-600 dark:text-red-400 mt-1">
-            {donors.filter(d => d.status === 'inactive' || d.status === 'rejected').length}
+          <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">💻 System Registered</p>
+          <p className="text-2xl font-bold text-blue-600 dark:text-blue-400 mt-1">
+            {totalCounts.systemDonors}
           </p>
         </div>
+        <div className="bg-white dark:bg-zinc-900 rounded-2xl p-4 shadow-sm border border-zinc-200/60 dark:border-zinc-800/60">
+          <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">🚶 Walk-in</p>
+          <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">
+            {totalCounts.walkInDonors}
+          </p>
+        </div>
+      </div>
+
+      {/* Tab Navigation - USING TOTAL COUNTS */}
+      <div className="flex gap-2 border-b border-zinc-200 dark:border-zinc-700 pb-2 flex-wrap">
+        <button
+          onClick={() => {
+            setActiveTab('all');
+            setPagination(prev => ({ ...prev, page: 1 }));
+          }}
+          className={`px-6 py-2.5 rounded-xl text-sm font-medium transition flex items-center gap-2 ${
+            activeTab === 'all'
+              ? 'bg-red-600 text-white shadow-lg shadow-red-200 dark:shadow-red-900/30'
+              : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+          }`}
+        >
+          <Users className="w-4 h-4" />
+          All Donors
+          <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${
+            activeTab === 'all'
+              ? 'bg-white/20 text-white'
+              : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-400'
+          }`}>
+            {totalCounts.totalDonors}
+          </span>
+        </button>
+        <button
+          onClick={() => {
+            setActiveTab('system');
+            setPagination(prev => ({ ...prev, page: 1 }));
+          }}
+          className={`px-6 py-2.5 rounded-xl text-sm font-medium transition flex items-center gap-2 ${
+            activeTab === 'system'
+              ? 'bg-blue-600 text-white shadow-lg shadow-blue-200 dark:shadow-blue-900/30'
+              : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+          }`}
+        >
+          <UserCog className="w-4 h-4" />
+          System Registered
+          <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${
+            activeTab === 'system'
+              ? 'bg-white/20 text-white'
+              : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-400'
+          }`}>
+            {totalCounts.systemDonors}
+          </span>
+        </button>
+        <button
+          onClick={() => {
+            setActiveTab('walk-in');
+            setPagination(prev => ({ ...prev, page: 1 }));
+          }}
+          className={`px-6 py-2.5 rounded-xl text-sm font-medium transition flex items-center gap-2 ${
+            activeTab === 'walk-in'
+              ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-200 dark:shadow-emerald-900/30'
+              : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+          }`}
+        >
+          <UserPlus className="w-4 h-4" />
+          Walk-in Donors
+          <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${
+            activeTab === 'walk-in'
+              ? 'bg-white/20 text-white'
+              : 'bg-zinc-200 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-400'
+          }`}>
+            {totalCounts.walkInDonors}
+          </span>
+        </button>
       </div>
 
       {/* Filters */}
@@ -530,7 +897,10 @@ export default function AdminDonorsPage() {
               type="text"
               placeholder="Search by name, email, phone, or ID..."
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setPagination(prev => ({ ...prev, page: 1 }));
+              }}
               className="w-full pl-10 pr-4 py-2.5 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm text-zinc-900 dark:text-white placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
             />
           </div>
@@ -538,7 +908,10 @@ export default function AdminDonorsPage() {
           <div className="flex items-center gap-2 flex-wrap">
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
+              onChange={(e) => {
+                setStatusFilter(e.target.value);
+                setPagination(prev => ({ ...prev, page: 1 }));
+              }}
               className="px-4 py-2.5 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
             >
               <option value="all">📋 All Status</option>
@@ -549,7 +922,10 @@ export default function AdminDonorsPage() {
 
             <select
               value={bloodTypeFilter}
-              onChange={(e) => setBloodTypeFilter(e.target.value)}
+              onChange={(e) => {
+                setBloodTypeFilter(e.target.value);
+                setPagination(prev => ({ ...prev, page: 1 }));
+              }}
               className="px-4 py-2.5 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
             >
               {bloodTypes.map(type => (
@@ -560,7 +936,7 @@ export default function AdminDonorsPage() {
         </div>
       </div>
 
-      {/* Donors Table */}
+      {/* Donors Table - Rest of the component remains the same */}
       <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-sm border border-zinc-200/60 dark:border-zinc-800/60 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -576,6 +952,9 @@ export default function AdminDonorsPage() {
                   Blood Type
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+                  Type
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
                   Status
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
@@ -589,10 +968,30 @@ export default function AdminDonorsPage() {
             <tbody className="divide-y divide-zinc-200/60 dark:divide-zinc-800/60">
               {donors.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center">
+                  <td colSpan={7} className="px-4 py-8 text-center">
                     <div className="flex flex-col items-center gap-2">
-                      <Users className="w-12 h-12 text-zinc-300 dark:text-zinc-600" />
-                      <p className="text-zinc-500 dark:text-zinc-400">No donor registrations found</p>
+                      {activeTab === 'walk-in' ? (
+                        <>
+                          <UserPlus className="w-12 h-12 text-zinc-300 dark:text-zinc-600" />
+                          <p className="text-zinc-500 dark:text-zinc-400">No walk-in donors found</p>
+                          <p className="text-sm text-zinc-400 dark:text-zinc-500">
+                            Walk-in donors will appear here when they are registered
+                          </p>
+                        </>
+                      ) : activeTab === 'system' ? (
+                        <>
+                          <UserCog className="w-12 h-12 text-zinc-300 dark:text-zinc-600" />
+                          <p className="text-zinc-500 dark:text-zinc-400">No system-registered donors found</p>
+                          <p className="text-sm text-zinc-400 dark:text-zinc-500">
+                            Users who register through the system will appear here
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <Users className="w-12 h-12 text-zinc-300 dark:text-zinc-600" />
+                          <p className="text-zinc-500 dark:text-zinc-400">No donor registrations found</p>
+                        </>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -600,25 +999,33 @@ export default function AdminDonorsPage() {
                 donors.map((donor) => (
                   <tr
                     key={donor.id}
-                    className="hover:bg-zinc-50 dark:hover:bg-zinc-800/30 transition-colors"
+                    className={`hover:bg-zinc-50 dark:hover:bg-zinc-800/30 transition-colors ${
+                      donor.registrationType === 'walk-in' ? 'bg-emerald-50/30 dark:bg-emerald-950/10' : ''
+                    }`}
                   >
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-full bg-gradient-to-br from-red-400 to-red-600 flex items-center justify-center text-white font-semibold text-sm">
+                        <div className={`w-9 h-9 rounded-full flex items-center justify-center text-white font-semibold text-sm ${
+                          donor.registrationType === 'walk-in'
+                            ? 'bg-gradient-to-br from-emerald-400 to-emerald-600'
+                            : 'bg-gradient-to-br from-red-400 to-red-600'
+                        }`}>
                           {getInitials(donor.fullName)}
                         </div>
                         <div>
                           <p className="text-sm font-medium text-zinc-900 dark:text-white">
                             {donor.fullName}
+                            {donor.registrationType === 'walk-in' && (
+                              <span className="ml-2 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                                🚶 Walk-in
+                              </span>
+                            )}
                           </p>
                           {donor.digitalId && (
                             <p className="text-xs font-mono text-zinc-500 dark:text-zinc-400">
                               ID: {donor.digitalId}
                             </p>
                           )}
-                          <p className="text-xs text-zinc-400">
-                            ID: {donor.id}
-                          </p>
                         </div>
                       </div>
                     </td>
@@ -641,6 +1048,19 @@ export default function AdminDonorsPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3">
+                      {donor.registrationType === 'walk-in' ? (
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-100 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400">
+                          <UserPlus className="w-3 h-3 mr-1" />
+                          Walk-in
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400">
+                          <UserCog className="w-3 h-3 mr-1" />
+                          System
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
                       <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium ${getStatusColor(donor.status)}`}>
                         {getStatusIcon(donor.status)}
                         {getStatusLabel(donor.status)}
@@ -658,32 +1078,14 @@ export default function AdminDonorsPage() {
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1">
-                        {/* Bell Icon - Send Notification */}
-                        {(donor.status === 'active' || donor.status === 'approved') && (
-                          <button
-                            onClick={() => {
-                              setSelectedDonor(donor);
-                              setShowNotifyModal(donor.id);
-                              setNotificationSubject(`🩸 Blood Donation Eligibility - ${donor.fullName}`);
-                              setNotificationMessage(`Dear ${donor.fullName},\n\nWe are pleased to inform you that you are eligible to donate blood. Your next donation can help save lives.\n\nBlood Type: ${donor.bloodType}\nNext Eligible Date: ${donor.nextEligible || 'Not set'}\n\nPlease schedule your donation at your earliest convenience.\n\nThank you for being a valued RedPulse donor!`);
-                            }}
-                            disabled={processingId === donor.id}
-                            className="p-1.5 hover:bg-blue-100 dark:hover:bg-blue-950/30 rounded-lg transition group"
-                            title="Send Eligibility Notification"
-                          >
-                            <Bell className="w-4 h-4 text-blue-500 group-hover:text-blue-600" />
-                          </button>
-                        )}
-                        {donor.status === 'pending' && (
+                        {/* Only show approve/reject for system donors (pending) */}
+                        {donor.registrationType !== 'walk-in' && donor.status === 'pending' && (
                           <>
                             <button
-                              onClick={() => {
-                                console.log('🟢 Approve button clicked for donor:', donor.id);
-                                handleApprove(donor.id);
-                              }}
+                              onClick={() => handleApprove(donor.id)}
                               disabled={processingId === donor.id}
                               className="p-1.5 hover:bg-emerald-100 dark:hover:bg-emerald-950/30 rounded-lg transition group"
-                              title="Approve Donor"
+                              title="Approve Donor (Sends Email + In-App)"
                             >
                               {processingId === donor.id ? (
                                 <Loader2 className="w-4 h-4 text-emerald-500 animate-spin" />
@@ -692,10 +1094,7 @@ export default function AdminDonorsPage() {
                               )}
                             </button>
                             <button
-                              onClick={() => {
-                                console.log('🔴 Reject button clicked for donor:', donor.id);
-                                setShowRejectModal(donor.id);
-                              }}
+                              onClick={() => setShowRejectModal(donor.id)}
                               disabled={processingId === donor.id}
                               className="p-1.5 hover:bg-red-100 dark:hover:bg-red-950/30 rounded-lg transition group"
                               title="Reject Donor"
@@ -704,6 +1103,24 @@ export default function AdminDonorsPage() {
                             </button>
                           </>
                         )}
+
+                        {/* Send Email & In-App Notification button for active donors */}
+                        {(donor.status === 'active' || donor.status === 'approved') && (
+                          <button
+                            onClick={() => {
+                              setSelectedDonor(donor);
+                              setShowNotifyModal(donor.id);
+                              loadNotificationTemplate('info', donor);
+                            }}
+                            disabled={processingId === donor.id}
+                            className="p-1.5 hover:bg-indigo-100 dark:hover:bg-indigo-950/30 rounded-lg transition group"
+                            title="Send Email & In-App Notification"
+                          >
+                            <Mail className="w-4 h-4 text-indigo-500 group-hover:text-indigo-600" />
+                          </button>
+                        )}
+
+                        {/* View details button */}
                         <button
                           onClick={() => {
                             setSelectedDonor(donor);
@@ -769,9 +1186,7 @@ export default function AdminDonorsPage() {
         </div>
       </div>
 
-      {/* ============ MODALS ============ */}
-
-      {/* View Details Modal */}
+      {/* ============ VIEW DETAILS MODAL ============ */}
       {showDetailsModal && selectedDonor && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white dark:bg-zinc-900 rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
@@ -787,7 +1202,11 @@ export default function AdminDonorsPage() {
             
             <div className="p-6 space-y-6">
               {/* Profile Header */}
-              <div className="bg-gradient-to-r from-red-600 to-red-700 -m-6 p-6 text-white mb-6">
+              <div className={`-m-6 p-6 text-white mb-6 ${
+                selectedDonor.registrationType === 'walk-in'
+                  ? 'bg-gradient-to-r from-emerald-600 to-emerald-700'
+                  : 'bg-gradient-to-r from-red-600 to-red-700'
+              }`}>
                 <div className="flex items-center gap-4">
                   <div className="h-20 w-20 rounded-full bg-white/20 flex items-center justify-center text-3xl font-bold border-4 border-white/30">
                     {getInitials(selectedDonor.fullName)}
@@ -809,6 +1228,17 @@ export default function AdminDonorsPage() {
                         {selectedDonor.status === 'active' || selectedDonor.status === 'approved' ? 'Active' : 
                          selectedDonor.status === 'pending' ? 'Pending' : 'Inactive'}
                       </span>
+                      {selectedDonor.registrationType === 'walk-in' ? (
+                        <span className="px-2 py-0.5 bg-emerald-500/30 rounded-full text-xs font-medium flex items-center gap-1">
+                          <UserPlus className="w-3 h-3" />
+                          Walk-in
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 bg-blue-500/30 rounded-full text-xs font-medium flex items-center gap-1">
+                          <UserCog className="w-3 h-3" />
+                          System
+                        </span>
+                      )}
                       <span className="px-2 py-0.5 bg-white/20 rounded-full text-xs font-medium">
                         ID: {selectedDonor.digitalId}
                       </span>
@@ -831,6 +1261,37 @@ export default function AdminDonorsPage() {
                   </Link>
                 </div>
               </div>
+
+              {/* Walk-in info section */}
+              {selectedDonor.registrationType === 'walk-in' && (
+                <div className="p-4 bg-emerald-50 dark:bg-emerald-950/20 rounded-lg border border-emerald-200 dark:border-emerald-800">
+                  <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400">
+                    <UserPlus className="w-5 h-5" />
+                    <div>
+                      <p className="font-medium">Walk-in Donor</p>
+                      <p className="text-sm text-emerald-600 dark:text-emerald-500">
+                        This donor was registered as a walk-in and is automatically active.
+                        No approval needed.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Pending info for system donors */}
+              {selectedDonor.registrationType !== 'walk-in' && selectedDonor.status === 'pending' && (
+                <div className="p-4 bg-amber-50 dark:bg-amber-950/20 rounded-lg border border-amber-200 dark:border-amber-800">
+                  <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400">
+                    <Clock className="w-5 h-5" />
+                    <div>
+                      <p className="font-medium">Pending Approval</p>
+                      <p className="text-sm text-amber-600 dark:text-amber-500">
+                        This donor registered through the system and needs admin approval.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Personal Information */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -977,8 +1438,8 @@ export default function AdminDonorsPage() {
                 </div>
               )}
 
-              {/* Admin Actions */}
-              {selectedDonor.status === 'pending' && (
+              {/* Admin Actions - Only show for system donors */}
+              {selectedDonor.registrationType !== 'walk-in' && selectedDonor.status === 'pending' && (
                 <div className="flex flex-wrap gap-3 pt-4 border-t border-zinc-200/60 dark:border-zinc-800/60">
                   <button
                     onClick={() => {
@@ -1008,19 +1469,18 @@ export default function AdminDonorsPage() {
                 </div>
               )}
 
-              {/* Send Notification Button in Details */}
+              {/* Send Email & In-App Notification Button in Details */}
               {(selectedDonor.status === 'active' || selectedDonor.status === 'approved') && (
                 <div className="flex flex-wrap gap-3 pt-4 border-t border-zinc-200/60 dark:border-zinc-800/60">
                   <button
                     onClick={() => {
                       setShowNotifyModal(selectedDonor.id);
-                      setNotificationSubject(`🩸 Blood Donation Eligibility - ${selectedDonor.fullName}`);
-                      setNotificationMessage(`Dear ${selectedDonor.fullName},\n\nWe are pleased to inform you that you are eligible to donate blood. Your next donation can help save lives.\n\nBlood Type: ${selectedDonor.bloodType}\nNext Eligible Date: ${selectedDonor.nextEligible || 'Not set'}\n\nPlease schedule your donation at your earliest convenience.\n\nThank you for being a valued RedPulse donor!`);
+                      loadNotificationTemplate('info', selectedDonor);
                     }}
-                    className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition shadow-lg shadow-blue-200 dark:shadow-blue-900/30 flex items-center gap-2"
+                    className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition shadow-lg shadow-indigo-200 dark:shadow-indigo-900/30 flex items-center gap-2"
                   >
-                    <Bell className="w-4 h-4" />
-                    Send Notification
+                    <Mail className="w-4 h-4" />
+                    Send Email & In-App Notification
                   </button>
                 </div>
               )}
@@ -1029,7 +1489,7 @@ export default function AdminDonorsPage() {
         </div>
       )}
 
-      {/* Reject Modal */}
+      {/* ============ REJECT MODAL ============ */}
       {showRejectModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white dark:bg-zinc-900 rounded-2xl max-w-md w-full shadow-2xl">
@@ -1048,16 +1508,16 @@ export default function AdminDonorsPage() {
             
             <div className="p-6 space-y-4">
               <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                Please provide a reason for rejecting this donor application.
+                Please provide a reason for rejecting this donor application. The donor will receive an email and in-app notification.
               </p>
               <div>
                 <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                  Reason for Rejection
+                  Reason for Rejection <span className="text-red-500">*</span>
                 </label>
                 <textarea
                   value={rejectionReason}
                   onChange={(e) => setRejectionReason(e.target.value)}
-                  rows={3}
+                  rows={4}
                   className="w-full px-4 py-2.5 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm text-zinc-900 dark:text-white placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500 resize-none"
                   placeholder="Enter reason for rejection..."
                 />
@@ -1084,25 +1544,28 @@ export default function AdminDonorsPage() {
                 ) : (
                   <UserX className="w-4 h-4" />
                 )}
-                Reject Donor
+                Reject & Send Notifications
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Notification Modal */}
+      {/* ============ EMAIL + IN-APP NOTIFICATION MODAL ============ */}
       {showNotifyModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-zinc-900 rounded-2xl max-w-2xl w-full shadow-2xl">
-            <div className="p-6 border-b border-zinc-200/60 dark:border-zinc-800/60 flex items-center justify-between">
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
+            <div className="p-6 border-b border-zinc-200/60 dark:border-zinc-800/60 flex items-center justify-between sticky top-0 bg-white dark:bg-zinc-900 z-10">
               <div>
                 <h3 className="text-xl font-semibold text-zinc-900 dark:text-white flex items-center gap-2">
-                  <Bell className="w-5 h-5 text-blue-500" />
-                  Send Eligibility Notification
+                  <Mail className="w-5 h-5 text-indigo-500" />
+                  Send Email & In-App Notification
                 </h3>
                 <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-                  Notify donor about their eligibility status
+                  Sending to: <strong>{selectedDonor?.fullName || 'Donor'}</strong> ({selectedDonor?.bloodType || 'Blood Type'})
+                </p>
+                <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-0.5">
+                  Email: {selectedDonor?.email || 'No email'}
                 </p>
               </div>
               <button
@@ -1110,6 +1573,7 @@ export default function AdminDonorsPage() {
                   setShowNotifyModal(null);
                   setNotificationSubject('');
                   setNotificationMessage('');
+                  setNotificationType('info');
                 }}
                 className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition"
               >
@@ -1118,6 +1582,31 @@ export default function AdminDonorsPage() {
             </div>
             
             <div className="p-6 space-y-4">
+              {/* Template Selector */}
+              <div>
+                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                  Quick Templates (Auto-fills donor info)
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {['info', 'success', 'warning', 'reminder', 'thank_you', 'schedule'].map((template) => {
+                    const donor = donors.find(d => d.id === showNotifyModal);
+                    return (
+                      <button
+                        key={template}
+                        onClick={() => loadNotificationTemplate(template, donor)}
+                        className={`px-3 py-2 text-xs font-medium rounded-lg transition capitalize ${
+                          notificationType === template
+                            ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200 dark:shadow-indigo-900/30'
+                            : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700'
+                        }`}
+                      >
+                        {template.replace('_', ' ')}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               <div>
                 <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
                   Subject <span className="text-red-500">*</span>
@@ -1126,7 +1615,7 @@ export default function AdminDonorsPage() {
                   type="text"
                   value={notificationSubject}
                   onChange={(e) => setNotificationSubject(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm text-zinc-900 dark:text-white placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                  className="w-full px-4 py-2.5 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm text-zinc-900 dark:text-white placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
                   placeholder="Enter notification subject..."
                 />
               </div>
@@ -1138,28 +1627,92 @@ export default function AdminDonorsPage() {
                 <textarea
                   value={notificationMessage}
                   onChange={(e) => setNotificationMessage(e.target.value)}
-                  rows={8}
-                  className="w-full px-4 py-2.5 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm text-zinc-900 dark:text-white placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none"
-                  placeholder="Enter notification message..."
+                  rows={10}
+                  className="w-full px-4 py-2.5 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm text-zinc-900 dark:text-white placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 resize-none font-mono"
+                  placeholder="Enter notification message... Use {donor_name}, {blood_type}, etc. for auto-fill"
                 />
-                <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1">
-                  Use {'{donor_name}'} and {'{blood_type}'} as placeholders
+                
+                <div className="flex flex-wrap gap-2 mt-2">
+                  <span className="text-xs text-zinc-500 dark:text-zinc-400">Available placeholders:</span>
+                  <button
+                    onClick={() => {
+                      setNotificationMessage(prev => prev + '{donor_name} ');
+                    }}
+                    className="text-xs bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded text-indigo-600 dark:text-indigo-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition"
+                  >
+                    {'{donor_name}'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setNotificationMessage(prev => prev + '{blood_type} ');
+                    }}
+                    className="text-xs bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded text-indigo-600 dark:text-indigo-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition"
+                  >
+                    {'{blood_type}'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setNotificationMessage(prev => prev + '{donor_id} ');
+                    }}
+                    className="text-xs bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded text-indigo-600 dark:text-indigo-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition"
+                  >
+                    {'{donor_id}'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setNotificationMessage(prev => prev + '{location} ');
+                    }}
+                    className="text-xs bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded text-indigo-600 dark:text-indigo-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition"
+                  >
+                    {'{location}'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setNotificationMessage(prev => prev + '{total_donations} ');
+                    }}
+                    className="text-xs bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded text-indigo-600 dark:text-indigo-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition"
+                  >
+                    {'{total_donations}'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setNotificationMessage(prev => prev + '{next_eligible} ');
+                    }}
+                    className="text-xs bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded text-indigo-600 dark:text-indigo-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition"
+                  >
+                    {'{next_eligible}'}
+                  </button>
+                </div>
+
+                <p className="text-xs text-amber-500 dark:text-amber-400 mt-2 flex items-center gap-1">
+                  <Info className="w-3 h-3" />
+                  This notification will be sent to the donor's email and will also appear in their in-app inbox.
                 </p>
               </div>
 
               {/* Preview */}
-              <div className="p-4 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
-                <p className="text-xs font-medium text-blue-600 dark:text-blue-400 mb-2 flex items-center gap-1">
+              <div className="p-4 bg-indigo-50 dark:bg-indigo-950/20 rounded-lg border border-indigo-200 dark:border-indigo-800">
+                <p className="text-xs font-medium text-indigo-600 dark:text-indigo-400 mb-2 flex items-center gap-1">
                   <Info className="w-3 h-3" />
-                  Preview
+                  Preview - Sending to: {selectedDonor?.fullName || 'Donor'} ({selectedDonor?.bloodType || 'Blood Type'})
                 </p>
                 <div className="space-y-2">
                   <p className="text-sm font-medium text-zinc-900 dark:text-white">{notificationSubject || 'Subject will appear here'}</p>
-                  <p className="text-sm text-zinc-600 dark:text-zinc-400 whitespace-pre-line">
+                  <p className="text-sm text-zinc-600 dark:text-zinc-400 whitespace-pre-line max-h-40 overflow-y-auto">
                     {notificationMessage || 'Message will appear here...'}
                   </p>
                 </div>
               </div>
+
+              {/* Notification Status */}
+              {notificationSent && (
+                <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 rounded-lg border border-emerald-200 dark:border-emerald-800">
+                  <p className="text-sm font-medium text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
+                    <Check className="w-4 h-4" />
+                    ✅ Email and in-app notification sent successfully to {selectedDonor?.fullName}!
+                  </p>
+                </div>
+              )}
             </div>
 
             <div className="p-6 border-t border-zinc-200/60 dark:border-zinc-800/60 flex justify-end gap-3">
@@ -1168,22 +1721,23 @@ export default function AdminDonorsPage() {
                   setShowNotifyModal(null);
                   setNotificationSubject('');
                   setNotificationMessage('');
+                  setNotificationType('info');
                 }}
                 className="px-4 py-2 text-sm font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl transition"
               >
                 Cancel
               </button>
               <button
-                onClick={() => handleSendNotification(showNotifyModal)}
+                onClick={() => handleSendEmailAndInAppNotification(showNotifyModal)}
                 disabled={processingId === showNotifyModal || !notificationSubject.trim() || !notificationMessage.trim()}
-                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                className="px-6 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-lg shadow-indigo-200 dark:shadow-indigo-900/30"
               >
                 {processingId === showNotifyModal ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
                 ) : (
                   <Send className="w-4 h-4" />
                 )}
-                Send Notification
+                Send Email & In-App
               </button>
             </div>
           </div>

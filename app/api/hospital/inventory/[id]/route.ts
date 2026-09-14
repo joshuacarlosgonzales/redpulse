@@ -1,4 +1,3 @@
-// app/api/hospital/inventory/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import dbConnect from '@/lib/mongodb'
 import BloodInventory from '@/models/BloodInventory'
@@ -21,9 +20,11 @@ export async function GET(
     }
 
     const token = authHeader.split(' ')[1]
-    
+
+    let decoded: any;
+
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret') as any
+      decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret') as any
       if (!decoded || (decoded.role !== 'hospital' && decoded.role !== 'admin')) {
         return NextResponse.json(
           { error: 'Unauthorized - Hospital or Admin access required' },
@@ -46,7 +47,15 @@ export async function GET(
       )
     }
 
-    const item = await BloodInventory.findById(id)
+    // Scope lookup to the caller's hospital so one hospital
+    // cannot view another hospital's inventory record by guessing the id.
+    // Admins are allowed to view any record.
+    const filter: any = { _id: id }
+    if (decoded.role !== 'admin') {
+      filter.hospitalId = new mongoose.Types.ObjectId(decoded.userId)
+    }
+
+    const item = await BloodInventory.findOne(filter)
     if (!item) {
       return NextResponse.json(
         { error: 'Inventory item not found' },
@@ -83,6 +92,7 @@ export async function GET(
         expiryDate: item.expirationDate,
         status: frontendStatus,
         location: item.notes || 'Main Storage',
+        hospitalId: item.hospitalId?.toString(),
         createdAt: item.createdAt,
         updatedAt: item.updatedAt,
       }
@@ -113,9 +123,11 @@ export async function PUT(
     }
 
     const token = authHeader.split(' ')[1]
-    
+
+    let decoded: any;
+
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret') as any
+      decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret') as any
       if (!decoded || (decoded.role !== 'hospital' && decoded.role !== 'admin')) {
         return NextResponse.json(
           { error: 'Unauthorized - Hospital or Admin access required' },
@@ -141,7 +153,14 @@ export async function PUT(
     const body = await request.json()
     const { quantity, expiryDate } = body
 
-    const item = await BloodInventory.findById(id)
+    // Scope lookup to the caller's hospital so one hospital
+    // cannot edit another hospital's inventory record by guessing the id.
+    const filter: any = { _id: id }
+    if (decoded.role !== 'admin') {
+      filter.hospitalId = new mongoose.Types.ObjectId(decoded.userId)
+    }
+
+    const item = await BloodInventory.findOne(filter)
     if (!item) {
       return NextResponse.json(
         { error: 'Inventory item not found' },
@@ -196,9 +215,11 @@ export async function DELETE(
     }
 
     const token = authHeader.split(' ')[1]
-    
+
+    let decoded: any;
+
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret') as any
+      decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret') as any
       if (!decoded || (decoded.role !== 'hospital' && decoded.role !== 'admin')) {
         return NextResponse.json(
           { error: 'Unauthorized - Hospital or Admin access required' },
@@ -221,7 +242,14 @@ export async function DELETE(
       )
     }
 
-    const item = await BloodInventory.findByIdAndDelete(id)
+    // Scope delete to the caller's hospital so one hospital
+    // cannot delete another hospital's inventory record by guessing the id.
+    const filter: any = { _id: id }
+    if (decoded.role !== 'admin') {
+      filter.hospitalId = new mongoose.Types.ObjectId(decoded.userId)
+    }
+
+    const item = await BloodInventory.findOneAndDelete(filter)
     if (!item) {
       return NextResponse.json(
         { error: 'Inventory item not found' },

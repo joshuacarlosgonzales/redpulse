@@ -6,7 +6,7 @@ import jwt from 'jsonwebtoken';
 
 export async function DELETE(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     await dbConnect();
@@ -31,7 +31,8 @@ export async function DELETE(
       }, { status: 403 });
     }
 
-    const { id } = params;
+    // Next.js 16: params is a Promise
+    const { id } = await params;
 
     if (!id) {
       return NextResponse.json({

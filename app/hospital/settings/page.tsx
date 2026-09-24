@@ -1,7 +1,7 @@
 // app/hospital/settings/page.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Building,
@@ -68,7 +68,7 @@ interface NotificationPreference {
   description: string;
 }
 
-export default function HospitalSettingsPage() {
+function HospitalSettingsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(true);
@@ -1201,5 +1201,17 @@ export default function HospitalSettingsPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function HospitalSettingsPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-red-600 animate-spin" />
+      </div>
+    }>
+      <HospitalSettingsContent />
+    </Suspense>
   );
 }

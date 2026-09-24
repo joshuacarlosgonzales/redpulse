@@ -1,18 +1,16 @@
-// app/api/auth/login/route.ts
+// app/api/auth/login/route.ts (without Turnstile)
 import { NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { dbConnect } from '@/lib'
 import mongoose from 'mongoose'
 
-const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY
-
 export async function POST(request: Request) {
   try {
     await dbConnect()
-    
+
     const body = await request.json()
-    const { email, password, turnstileToken } = body
+    const { email, password } = body
 
     console.log('🔍 Login attempt for:', email)
 
@@ -24,37 +22,6 @@ export async function POST(request: Request) {
       }, { status: 400 })
     }
 
-    // Verify Cloudflare Turnstile
-    if (!turnstileToken) {
-      return NextResponse.json({
-        success: false,
-        error: 'Security verification required'
-      }, { status: 400 })
-    }
-
-    // Verify Turnstile token
-    const turnstileFormData = new FormData()
-    turnstileFormData.append('secret', TURNSTILE_SECRET_KEY || '')
-    turnstileFormData.append('response', turnstileToken)
-
-    const turnstileResponse = await fetch(
-      'https://challenges.cloudflare.com/turnstile/v0/siteverify',
-      {
-        method: 'POST',
-        body: turnstileFormData,
-      }
-    )
-
-    const turnstileResult = await turnstileResponse.json()
-
-    if (!turnstileResult.success) {
-      console.error('Turnstile verification failed:', turnstileResult)
-      return NextResponse.json({
-        success: false,
-        error: 'Security verification failed. Please try again.'
-      }, { status: 400 })
-    }
-
     // Get native MongoDB connection
     const db = mongoose.connection.db
     if (!db) {
@@ -63,16 +30,16 @@ export async function POST(request: Request) {
         error: 'Database connection error'
       }, { status: 500 })
     }
-    
+
     const cleanEmail = email.trim().toLowerCase()
     const usersCollection = db.collection('users')
-    
+
     // Find the user
     let user = await usersCollection.findOne({ email: cleanEmail })
-    
+
     if (!user) {
-      user = await usersCollection.findOne({ 
-        email: { $regex: cleanEmail, $options: 'i' } 
+      user = await usersCollection.findOne({
+        email: { $regex: cleanEmail, $options: 'i' }
       })
     }
 
@@ -134,9 +101,9 @@ export async function POST(request: Request) {
 
     // Create JWT token
     const token = jwt.sign(
-      { 
-        userId: user._id.toString(), 
-        email: user.email, 
+      {
+        userId: user._id.toString(),
+        email: user.email,
         fullName: user.fullName,
         role: user.role
       },
@@ -164,7 +131,7 @@ export async function POST(request: Request) {
       userData.totalDonations = user.donationCount || 0
       userData.lastDonation = user.lastDonation || 'No donations yet'
       userData.nextEligible = user.nextEligibleDate || 'Not yet eligible'
-      
+
       if (donorData) {
         userData.donorId = donorData._id?.toString() || null
         userData.donorProfileExists = true

@@ -1,16 +1,15 @@
+// app/api/auth/forgot-password/route.ts (without Turnstile)
 import { NextResponse } from 'next/server'
 import { dbConnect } from '@/lib'
 import mongoose from 'mongoose'
 import { transporter } from '@/lib/mailer'
 
-const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY
-
 export async function POST(request: Request) {
   try {
     await dbConnect()
-    
+
     const body = await request.json()
-    const { email, turnstileToken } = body
+    const { email } = body
 
     // Validate email
     if (!email) {
@@ -18,39 +17,6 @@ export async function POST(request: Request) {
         success: false,
         error: 'Email is required'
       }, { status: 400 })
-    }
-
-    // Verify Turnstile if token is provided
-    if (turnstileToken) {
-      try {
-        const turnstileFormData = new FormData()
-        turnstileFormData.append('secret', TURNSTILE_SECRET_KEY || '')
-        turnstileFormData.append('response', turnstileToken)
-
-        const turnstileResponse = await fetch(
-          'https://challenges.cloudflare.com/turnstile/v0/siteverify',
-          {
-            method: 'POST',
-            body: turnstileFormData,
-          }
-        )
-
-        const turnstileResult = await turnstileResponse.json()
-
-        if (!turnstileResult.success) {
-          console.error('Turnstile verification failed:', turnstileResult)
-          return NextResponse.json({
-            success: false,
-            error: 'Security verification failed. Please try again.'
-          }, { status: 400 })
-        }
-      } catch (turnstileError) {
-        console.error('Turnstile verification error:', turnstileError)
-        return NextResponse.json({
-          success: false,
-          error: 'Security verification failed. Please try again.'
-        }, { status: 400 })
-      }
     }
 
     // Get native MongoDB connection
@@ -68,8 +34,8 @@ export async function POST(request: Request) {
     // Find the user by email (case insensitive)
     let user = await usersCollection.findOne({ email: cleanEmail })
     if (!user) {
-      user = await usersCollection.findOne({ 
-        email: { $regex: `^${cleanEmail}$`, $options: 'i' } 
+      user = await usersCollection.findOne({
+        email: { $regex: `^${cleanEmail}$`, $options: 'i' }
       })
     }
 
@@ -93,12 +59,12 @@ export async function POST(request: Request) {
     // Store OTP in database for persistence
     const updateResult = await usersCollection.updateOne(
       { _id: user._id },
-      { 
-        $set: { 
+      {
+        $set: {
           resetPasswordOTP: otp,
           resetPasswordOTPExpires: new Date(expiresAt),
           updatedAt: new Date()
-        } 
+        }
       }
     )
 
@@ -129,39 +95,39 @@ export async function POST(request: Request) {
                 .header h1 { color: #ffffff; margin: 0; font-size: 28px; }
                 .header p { color: #fca5a5; margin: 5px 0 0; font-size: 14px; }
                 .content { padding: 30px; }
-                .otp-box { 
-                  background: #fef2f2; 
-                  border: 2px solid #dc2626; 
-                  border-radius: 12px; 
-                  padding: 20px; 
+                .otp-box {
+                  background: #fef2f2;
+                  border: 2px solid #dc2626;
+                  border-radius: 12px;
+                  padding: 20px;
                   text-align: center;
                   margin: 20px 0;
                 }
-                .otp-code { 
-                  font-size: 48px; 
-                  font-weight: bold; 
-                  color: #dc2626; 
+                .otp-code {
+                  font-size: 48px;
+                  font-weight: bold;
+                  color: #dc2626;
                   letter-spacing: 10px;
                   font-family: 'Courier New', monospace;
                 }
-                .otp-label { 
-                  font-size: 12px; 
-                  color: #666; 
-                  text-transform: uppercase; 
+                .otp-label {
+                  font-size: 12px;
+                  color: #666;
+                  text-transform: uppercase;
                   letter-spacing: 2px;
                   margin-bottom: 5px;
                 }
-                .info { 
-                  color: #666666; 
-                  font-size: 14px; 
+                .info {
+                  color: #666666;
+                  font-size: 14px;
                   line-height: 1.6;
                   margin: 10px 0;
                 }
-                .warning { 
-                  background: #fef3c7; 
-                  padding: 12px; 
-                  border-radius: 8px; 
-                  color: #92400e; 
+                .warning {
+                  background: #fef3c7;
+                  padding: 12px;
+                  border-radius: 8px;
+                  color: #92400e;
                   font-size: 13px;
                   margin: 15px 0;
                 }
@@ -177,19 +143,19 @@ export async function POST(request: Request) {
                 <div class="content">
                   <h2 style="color: #333; margin-top: 0;">Password Reset Code</h2>
                   <p class="info">We received a request to reset your password. Use the 6-digit code below to create a new password:</p>
-                  
+
                   <div class="otp-box">
                     <div class="otp-label">Your Verification Code</div>
                     <div class="otp-code">${otp}</div>
                   </div>
-                  
+
                   <p class="info">This code will expire in <strong>10 minutes</strong>.</p>
-                  
+
                   <div class="warning">
-                    ⚠️ If you didn't request this, please ignore this email. 
+                    ⚠️ If you didn't request this, please ignore this email.
                     Never share this code with anyone.
                   </div>
-                  
+
                   <p class="info" style="font-size: 13px; color: #888;">
                     Enter this code on the password reset page to continue.
                   </p>
@@ -219,11 +185,11 @@ export async function POST(request: Request) {
       // Clear OTP from database if email fails
       await usersCollection.updateOne(
         { _id: user._id },
-        { 
-          $unset: { 
+        {
+          $unset: {
             resetPasswordOTP: "",
             resetPasswordOTPExpires: "",
-          } 
+          }
         }
       )
       return NextResponse.json({

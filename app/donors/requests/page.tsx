@@ -144,9 +144,7 @@ export default function BloodRequestsPage() {
     try {
       const token = localStorage.getItem('token');
       const response = await fetch('/api/user/blood-requests', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: { 'Authorization': `Bearer ${token}` }
       });
 
       if (response.ok) {
@@ -165,9 +163,7 @@ export default function BloodRequestsPage() {
     try {
       const token = localStorage.getItem('token');
       const response = await fetch('/api/donor/notifications', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: { 'Authorization': `Bearer ${token}` }
       });
 
       if (response.ok) {
@@ -185,15 +181,11 @@ export default function BloodRequestsPage() {
       const token = localStorage.getItem('token');
       const response = await fetch(`/api/donor/notifications?id=${id}`, {
         method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: { 'Authorization': `Bearer ${token}` }
       });
 
       if (response.ok) {
-        setNotifications(prev => 
-          prev.map(n => n._id === id ? { ...n, isRead: true } : n)
-        );
+        setNotifications(prev => prev.map(n => n._id === id ? { ...n, isRead: true } : n));
         setUnreadCount(prev => Math.max(0, prev - 1));
       }
     } catch (error) {
@@ -206,15 +198,11 @@ export default function BloodRequestsPage() {
       const token = localStorage.getItem('token');
       const response = await fetch('/api/donor/notifications', {
         method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: { 'Authorization': `Bearer ${token}` }
       });
 
       if (response.ok) {
-        setNotifications(prev => 
-          prev.map(n => ({ ...n, isRead: true }))
-        );
+        setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
         setUnreadCount(0);
       }
     } catch (error) {
@@ -267,17 +255,11 @@ export default function BloodRequestsPage() {
       const token = localStorage.getItem('token');
       const response = await fetch(`/api/user/blood-requests?id=${requestId}`, {
         method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: { 'Authorization': `Bearer ${token}` }
       });
 
       if (response.ok) {
-        setBloodRequests(prev => 
-          prev.map(r => 
-            r.id === requestId ? { ...r, status: 'cancelled' as const } : r
-          )
-        );
+        setBloodRequests(prev => prev.map(r => r.id === requestId ? { ...r, status: 'cancelled' as const } : r));
         alert('Request cancelled successfully');
       }
     } catch (error) {
@@ -315,27 +297,6 @@ export default function BloodRequestsPage() {
     return accents[urgency as keyof typeof accents];
   };
 
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'pending':
-        return <Clock className="h-3.5 w-3.5" />;
-      case 'approved':
-        return <Check className="h-3.5 w-3.5" />;
-      case 'fulfilled':
-        return <CheckCircle className="h-3.5 w-3.5" />;
-      case 'rejected':
-        return <XCircle className="h-3.5 w-3.5" />;
-      case 'cancelled':
-        return <XCircle className="h-3.5 w-3.5" />;
-      default:
-        return null;
-    }
-  };
-
-  const getStatusLabel = (status: string) => {
-    return status.charAt(0).toUpperCase() + status.slice(1);
-  };
-
   const getStatusBadge = (status: string) => {
     const config = {
       pending: { icon: Clock, label: 'Pending', color: 'text-amber-600 dark:text-amber-400' },
@@ -352,7 +313,6 @@ export default function BloodRequestsPage() {
     return bloodRequests.filter(r => r.status === status).length;
   };
 
-  // Journey stage for the lifeline rail — pure presentation, derived from status only
   const getJourneyStage = (status: string) => {
     if (status === 'rejected' || status === 'cancelled') return -1;
     if (status === 'pending') return 0;
@@ -361,7 +321,7 @@ export default function BloodRequestsPage() {
     return 0;
   };
 
-  // Notification dropdown
+  // Notification dropdown — mobile-safe: uses fixed positioning on phone
   const NotificationDropdown = () => {
     const [isOpen, setIsOpen] = useState(false);
 
@@ -372,11 +332,12 @@ export default function BloodRequestsPage() {
             setIsOpen(!isOpen);
             if (!isOpen) fetchNotifications();
           }}
-          className="relative p-2.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl transition-colors flex-shrink-0"
+          className="relative p-2.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl transition-colors flex-shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center"
+          aria-label="Notifications"
         >
           <Bell className="h-5 w-5 text-zinc-500 dark:text-zinc-400" />
           {unreadCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 bg-red-600 text-white text-[10px] font-bold rounded-full h-4.5 w-4.5 min-w-[18px] h-[18px] flex items-center justify-center ring-2 ring-white dark:ring-zinc-900">
+            <span className="absolute top-0 right-0 bg-red-600 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 ring-2 ring-white dark:ring-zinc-900">
               {unreadCount}
             </span>
           )}
@@ -385,8 +346,18 @@ export default function BloodRequestsPage() {
         {isOpen && (
           <>
             <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
-            <div className="absolute right-0 mt-2 w-80 max-h-96 overflow-y-auto bg-white dark:bg-zinc-900 rounded-2xl shadow-xl shadow-zinc-900/10 border border-zinc-200 dark:border-zinc-800 z-50">
-              <div className="p-4 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between sticky top-0 bg-white dark:bg-zinc-900 rounded-t-2xl">
+            {/* Mobile: full-width fixed panel below header. Desktop: absolute dropdown. */}
+            <div className="
+              fixed sm:absolute
+              left-3 right-3 sm:left-auto sm:right-0
+              top-[72px] sm:top-auto sm:mt-2
+              sm:w-80
+              max-h-[70vh] sm:max-h-96 overflow-y-auto
+              bg-white dark:bg-zinc-900 rounded-2xl
+              shadow-xl shadow-zinc-900/10 border border-zinc-200 dark:border-zinc-800
+              z-50
+            ">
+              <div className="p-4 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between sticky top-0 bg-white dark:bg-zinc-900 rounded-t-2xl z-10">
                 <h4 className="text-sm font-semibold text-zinc-900 dark:text-white">Notifications</h4>
                 {unreadCount > 0 && (
                   <button
@@ -409,6 +380,7 @@ export default function BloodRequestsPage() {
                     onClick={() => {
                       handleMarkAsRead(notif._id);
                       if (notif.link) router.push(notif.link);
+                      setIsOpen(false);
                     }}
                     className={`p-4 border-b border-zinc-100 dark:border-zinc-800 cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors ${
                       !notif.isRead ? 'bg-red-50/40 dark:bg-red-950/10' : ''
@@ -439,7 +411,7 @@ export default function BloodRequestsPage() {
               {notifications.length > 5 && (
                 <div className="p-3 text-center border-t border-zinc-100 dark:border-zinc-800">
                   <button
-                    onClick={() => setShowNotificationModal(true)}
+                    onClick={() => { setShowNotificationModal(true); setIsOpen(false); }}
                     className="text-sm text-red-600 hover:text-red-700 dark:text-red-400 font-medium"
                   >
                     View all notifications →
@@ -466,32 +438,34 @@ export default function BloodRequestsPage() {
 
   return (
     <div className="max-w-full">
-      {/* Header */}
-      <div className="relative overflow-hidden bg-white dark:bg-zinc-900 rounded-2xl p-5 sm:p-7 border border-zinc-200 dark:border-zinc-800">
+      {/* ============ HEADER ============ */}
+      <div className="relative overflow-hidden bg-white dark:bg-zinc-900 rounded-2xl p-4 sm:p-7 border border-zinc-200 dark:border-zinc-800">
         <div className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-red-50 dark:bg-red-950/20 blur-2xl" />
-        <div className="relative flex flex-col sm:flex-row sm:items-center justify-between gap-5">
-          <div className="flex items-center gap-4 min-w-0 flex-1">
-            <div className="h-13 w-13 h-[52px] w-[52px] rounded-2xl bg-gradient-to-br from-red-600 to-rose-800 flex items-center justify-center shadow-lg shadow-red-900/20 flex-shrink-0 ring-1 ring-red-900/10">
-              <Syringe className="h-6 w-6 text-white" strokeWidth={2} />
+        <div className="relative flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between sm:gap-5">
+          {/* Title row */}
+          <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1">
+            <div className="h-12 w-12 sm:h-[52px] sm:w-[52px] rounded-2xl bg-gradient-to-br from-red-600 to-rose-800 flex items-center justify-center shadow-lg shadow-red-900/20 flex-shrink-0 ring-1 ring-red-900/10">
+              <Syringe className="h-5 w-5 sm:h-6 sm:w-6 text-white" strokeWidth={2} />
             </div>
             <div className="min-w-0 flex-1">
-              
-              <h1 className="text-xl sm:text-2xl font-bold text-zinc-900 dark:text-white tracking-tight flex items-center gap-2">
+              <h1 className="text-lg sm:text-2xl font-bold text-zinc-900 dark:text-white tracking-tight flex items-center gap-2 flex-wrap">
                 Blood Requests
-                <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-full">
+                <span className="text-[10px] sm:text-xs font-semibold text-zinc-500 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-full">
                   {bloodRequests.length}
                 </span>
               </h1>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400 truncate mt-0.5">
+              <p className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400 truncate mt-0.5">
                 Request blood for yourself or someone in your care
               </p>
             </div>
           </div>
+
+          {/* Actions row — full width on phone */}
           <div className="flex items-center gap-2 flex-shrink-0">
             <NotificationDropdown />
             <button
               onClick={() => setShowRequestModal(true)}
-              className="flex items-center gap-2 px-4 py-2.5 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white rounded-xl transition-colors shadow-sm text-sm font-semibold whitespace-nowrap"
+              className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2.5 min-h-[44px] bg-red-600 hover:bg-red-700 active:bg-red-800 text-white rounded-xl transition-colors shadow-sm text-sm font-semibold whitespace-nowrap"
             >
               <Plus className="h-4 w-4" strokeWidth={2.5} />
               <span>New Request</span>
@@ -500,41 +474,41 @@ export default function BloodRequestsPage() {
         </div>
       </div>
 
-      {/* Quick Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 divide-x divide-y sm:divide-y-0 divide-zinc-100 dark:divide-zinc-800 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 mt-4 overflow-hidden">
-        <div className="p-4 text-center sm:text-left">
-          <p className="text-[11px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wide">Total</p>
-          <p className="text-xl font-bold text-zinc-900 dark:text-white mt-1">{bloodRequests.length}</p>
+      {/* ============ QUICK STATS — 2 cols on phone, 5 on sm+ ============ */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-px bg-zinc-100 dark:bg-zinc-800 rounded-2xl border border-zinc-200 dark:border-zinc-800 mt-3 sm:mt-4 overflow-hidden">
+        <div className="p-3 sm:p-4 bg-white dark:bg-zinc-900 text-center sm:text-left">
+          <p className="text-[10px] sm:text-[11px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wide">Total</p>
+          <p className="text-lg sm:text-xl font-bold text-zinc-900 dark:text-white mt-0.5 sm:mt-1">{bloodRequests.length}</p>
         </div>
-        <div className="p-4 text-center sm:text-left">
-          <p className="text-[11px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wide">Pending</p>
-          <p className="text-xl font-bold text-amber-600 dark:text-amber-400 mt-1">
+        <div className="p-3 sm:p-4 bg-white dark:bg-zinc-900 text-center sm:text-left">
+          <p className="text-[10px] sm:text-[11px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wide">Pending</p>
+          <p className="text-lg sm:text-xl font-bold text-amber-600 dark:text-amber-400 mt-0.5 sm:mt-1">
             {bloodRequests.filter(r => r.status === 'pending').length}
           </p>
         </div>
-        <div className="p-4 text-center sm:text-left">
-          <p className="text-[11px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wide">Approved</p>
-          <p className="text-xl font-bold text-teal-600 dark:text-teal-400 mt-1">
+        <div className="p-3 sm:p-4 bg-white dark:bg-zinc-900 text-center sm:text-left">
+          <p className="text-[10px] sm:text-[11px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wide">Approved</p>
+          <p className="text-lg sm:text-xl font-bold text-teal-600 dark:text-teal-400 mt-0.5 sm:mt-1">
             {bloodRequests.filter(r => r.status === 'approved').length}
           </p>
         </div>
-        <div className="p-4 text-center sm:text-left">
-          <p className="text-[11px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wide">Fulfilled</p>
-          <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">
+        <div className="p-3 sm:p-4 bg-white dark:bg-zinc-900 text-center sm:text-left">
+          <p className="text-[10px] sm:text-[11px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wide">Fulfilled</p>
+          <p className="text-lg sm:text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-0.5 sm:mt-1">
             {bloodRequests.filter(r => r.status === 'fulfilled').length}
           </p>
         </div>
-        <div className="p-4 text-center sm:text-left col-span-2 sm:col-span-1">
-          <p className="text-[11px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wide">Rejected</p>
-          <p className="text-xl font-bold text-rose-600 dark:text-rose-400 mt-1">
+        <div className="p-3 sm:p-4 bg-white dark:bg-zinc-900 text-center sm:text-left col-span-2 sm:col-span-1">
+          <p className="text-[10px] sm:text-[11px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wide">Rejected</p>
+          <p className="text-lg sm:text-xl font-bold text-rose-600 dark:text-rose-400 mt-0.5 sm:mt-1">
             {bloodRequests.filter(r => r.status === 'rejected' || r.status === 'cancelled').length}
           </p>
         </div>
       </div>
 
-      {/* Search and Filters */}
-      <div className="bg-white dark:bg-zinc-900 rounded-2xl p-4 border border-zinc-200 dark:border-zinc-800 mt-4">
-        <div className="flex flex-col sm:flex-row gap-3">
+      {/* ============ SEARCH + FILTER ============ */}
+      <div className="bg-white dark:bg-zinc-900 rounded-2xl p-3 sm:p-4 border border-zinc-200 dark:border-zinc-800 mt-3 sm:mt-4">
+        <div className="flex flex-col gap-2 sm:flex-row sm:gap-3">
           <div className="flex-1 relative">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" />
             <input
@@ -542,12 +516,12 @@ export default function BloodRequestsPage() {
               placeholder="Search by hospital, blood type, patient…"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm text-zinc-900 dark:text-white placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-400 transition-colors"
+              className="w-full pl-10 pr-4 py-2.5 min-h-[44px] bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-xl text-sm text-zinc-900 dark:text-white placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-400 transition-colors"
             />
           </div>
           <button
             onClick={() => setShowFilters(!showFilters)}
-            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-zinc-50 dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700 rounded-xl transition-colors text-sm font-medium text-zinc-700 dark:text-zinc-300 whitespace-nowrap"
+            className="flex items-center justify-center gap-2 px-4 py-2.5 min-h-[44px] bg-zinc-50 dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700 rounded-xl transition-colors text-sm font-medium text-zinc-700 dark:text-zinc-300 whitespace-nowrap"
           >
             <Filter className="h-4 w-4" />
             <span>Filters</span>
@@ -556,75 +530,78 @@ export default function BloodRequestsPage() {
         </div>
 
         {showFilters && (
-          <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-zinc-100 dark:border-zinc-800">
-            <button
-              onClick={() => setSelectedFilter('all')}
-              className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
-                selectedFilter === 'all'
-                  ? 'bg-zinc-900 dark:bg-white text-white dark:text-zinc-900'
-                  : 'bg-zinc-50 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700'
-              }`}
-            >
-              All ({getFilterCount('all')})
-            </button>
-            <button
-              onClick={() => setSelectedFilter('pending')}
-              className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
-                selectedFilter === 'pending'
-                  ? 'bg-amber-500 text-white'
-                  : 'bg-zinc-50 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700'
-              }`}
-            >
-              Pending ({getFilterCount('pending')})
-            </button>
-            <button
-              onClick={() => setSelectedFilter('approved')}
-              className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
-                selectedFilter === 'approved'
-                  ? 'bg-teal-600 text-white'
-                  : 'bg-zinc-50 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700'
-              }`}
-            >
-              Approved ({getFilterCount('approved')})
-            </button>
-            <button
-              onClick={() => setSelectedFilter('fulfilled')}
-              className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
-                selectedFilter === 'fulfilled'
-                  ? 'bg-emerald-600 text-white'
-                  : 'bg-zinc-50 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700'
-              }`}
-            >
-              Fulfilled ({getFilterCount('fulfilled')})
-            </button>
-            <button
-              onClick={() => setSelectedFilter('rejected')}
-              className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
-                selectedFilter === 'rejected'
-                  ? 'bg-rose-600 text-white'
-                  : 'bg-zinc-50 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700'
-              }`}
-            >
-              Rejected ({getFilterCount('rejected') + getFilterCount('cancelled')})
-            </button>
+          // Horizontal scroll on phone, wrap on tablet+
+          <div className="mt-3 sm:mt-4 pt-3 sm:pt-4 border-t border-zinc-100 dark:border-zinc-800">
+            <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 sm:flex-wrap sm:overflow-visible sm:pb-0 scrollbar-thin">
+              <button
+                onClick={() => setSelectedFilter('all')}
+                className={`flex-shrink-0 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                  selectedFilter === 'all'
+                    ? 'bg-zinc-900 dark:bg-white text-white dark:text-zinc-900'
+                    : 'bg-zinc-50 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700'
+                }`}
+              >
+                All ({getFilterCount('all')})
+              </button>
+              <button
+                onClick={() => setSelectedFilter('pending')}
+                className={`flex-shrink-0 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                  selectedFilter === 'pending'
+                    ? 'bg-amber-500 text-white'
+                    : 'bg-zinc-50 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700'
+                }`}
+              >
+                Pending ({getFilterCount('pending')})
+              </button>
+              <button
+                onClick={() => setSelectedFilter('approved')}
+                className={`flex-shrink-0 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                  selectedFilter === 'approved'
+                    ? 'bg-teal-600 text-white'
+                    : 'bg-zinc-50 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700'
+                }`}
+              >
+                Approved ({getFilterCount('approved')})
+              </button>
+              <button
+                onClick={() => setSelectedFilter('fulfilled')}
+                className={`flex-shrink-0 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                  selectedFilter === 'fulfilled'
+                    ? 'bg-emerald-600 text-white'
+                    : 'bg-zinc-50 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700'
+                }`}
+              >
+                Fulfilled ({getFilterCount('fulfilled')})
+              </button>
+              <button
+                onClick={() => setSelectedFilter('rejected')}
+                className={`flex-shrink-0 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                  selectedFilter === 'rejected'
+                    ? 'bg-rose-600 text-white'
+                    : 'bg-zinc-50 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700'
+                }`}
+              >
+                Rejected ({getFilterCount('rejected') + getFilterCount('cancelled')})
+              </button>
+            </div>
           </div>
         )}
       </div>
 
-      {/* Requests List */}
+      {/* ============ REQUESTS LIST ============ */}
       {filteredRequests.length === 0 ? (
-        <div className="bg-white dark:bg-zinc-900 rounded-2xl p-10 sm:p-14 border border-dashed border-zinc-200 dark:border-zinc-700 mt-4 text-center">
-          <div className="h-16 w-16 rounded-2xl bg-red-50 dark:bg-red-950/20 flex items-center justify-center mx-auto mb-4">
-            <Syringe className="h-8 w-8 text-red-300 dark:text-red-800" strokeWidth={1.5} />
+        <div className="bg-white dark:bg-zinc-900 rounded-2xl p-8 sm:p-14 border border-dashed border-zinc-200 dark:border-zinc-700 mt-3 sm:mt-4 text-center">
+          <div className="h-14 w-14 sm:h-16 sm:w-16 rounded-2xl bg-red-50 dark:bg-red-950/20 flex items-center justify-center mx-auto mb-4">
+            <Syringe className="h-7 w-7 sm:h-8 sm:w-8 text-red-300 dark:text-red-800" strokeWidth={1.5} />
           </div>
-          <h3 className="text-base font-semibold text-zinc-900 dark:text-white">No blood requests yet</h3>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1 max-w-sm mx-auto">
+          <h3 className="text-sm sm:text-base font-semibold text-zinc-900 dark:text-white">No blood requests yet</h3>
+          <p className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400 mt-1 max-w-sm mx-auto">
             {searchQuery ? 'Nothing matches your search — try a different hospital, blood type, or name.' : 'When you need blood for yourself or someone in your care, start a request here.'}
           </p>
           {!searchQuery && (
             <button
               onClick={() => setShowRequestModal(true)}
-              className="mt-5 px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl transition-colors text-sm font-semibold inline-flex items-center gap-2"
+              className="mt-5 px-5 py-2.5 min-h-[44px] bg-red-600 hover:bg-red-700 text-white rounded-xl transition-colors text-sm font-semibold inline-flex items-center gap-2"
             >
               <Plus className="h-4 w-4" strokeWidth={2.5} />
               Make your first request
@@ -632,11 +609,10 @@ export default function BloodRequestsPage() {
           )}
         </div>
       ) : (
-        <div className="space-y-2 mt-4">
+        <div className="space-y-2 mt-3 sm:mt-4">
           {filteredRequests.map((request) => {
             const StatusIcon = getStatusBadge(request.status).icon;
             const statusLabel = getStatusBadge(request.status).label;
-            const statusColor = getStatusBadge(request.status).color;
             const journeyStage = getJourneyStage(request.status);
 
             return (
@@ -645,8 +621,8 @@ export default function BloodRequestsPage() {
                 className={`bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 border-l-4 ${getUrgencyAccent(request.urgency)} hover:border-zinc-300 dark:hover:border-zinc-700 transition-colors overflow-hidden`}
               >
                 <div className="p-3 sm:p-3.5">
-                  <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-                    {/* Left side - Main info */}
+                  <div className="flex flex-col gap-2.5 sm:gap-3">
+                    {/* Main info */}
                     <div className="flex items-start gap-2.5 min-w-0 flex-1">
                       <div className={`h-8 w-8 rounded-lg flex items-center justify-center flex-shrink-0 border ${
                         request.urgency === 'critical' ? 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-900' :
@@ -673,13 +649,13 @@ export default function BloodRequestsPage() {
                           </span>
                         </div>
 
-                        {/* Journey rail — only for active, non-terminal-negative requests */}
+                        {/* Journey rail — hide labels on very small phones to prevent overflow */}
                         {journeyStage >= 0 && (
                           <div className="flex items-center gap-1 mt-1.5 mb-0.5">
                             {['Submitted', 'Reviewed', 'Fulfilled'].map((label, i) => (
                               <div key={label} className="flex items-center gap-1">
                                 <div className={`h-1 w-1 rounded-full ${i <= journeyStage ? 'bg-red-600' : 'bg-zinc-200 dark:bg-zinc-700'}`} />
-                                <span className={`text-[9px] font-medium tracking-wide ${i <= journeyStage ? 'text-zinc-600 dark:text-zinc-300' : 'text-zinc-300 dark:text-zinc-600'}`}>
+                                <span className={`hidden xs:inline text-[9px] font-medium tracking-wide ${i <= journeyStage ? 'text-zinc-600 dark:text-zinc-300' : 'text-zinc-300 dark:text-zinc-600'}`}>
                                   {label}
                                 </span>
                                 {i < 2 && <div className={`w-3 h-px ${i < journeyStage ? 'bg-red-300' : 'bg-zinc-200 dark:bg-zinc-700'}`} />}
@@ -688,7 +664,7 @@ export default function BloodRequestsPage() {
                           </div>
                         )}
 
-                        {/* Details grid */}
+                        {/* Details grid — 1 col on phone, 2 on sm+ */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1 mt-1.5">
                           <div className="flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400 min-w-0">
                             <Building2 className="h-3 w-3 flex-shrink-0 text-zinc-400" />
@@ -759,36 +735,38 @@ export default function BloodRequestsPage() {
                       </div>
                     </div>
 
-                    {/* Right side - Actions */}
-                    <div className="flex items-center gap-2 flex-shrink-0 self-end sm:self-start">
-                      {request.status === 'pending' && (
-                        <button
-                          onClick={() => cancelRequest(request.id)}
-                          className="px-2.5 py-1 text-[11px] font-semibold bg-white hover:bg-rose-50 dark:bg-zinc-800 dark:hover:bg-rose-950/30 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900 rounded-md transition-colors flex items-center gap-1"
-                        >
-                          <XCircle className="h-3 w-3" />
-                          Cancel
-                        </button>
-                      )}
-                      {request.status === 'approved' && (
-                        <div className="px-2.5 py-1 text-[11px] font-semibold bg-teal-50 dark:bg-teal-950/30 text-teal-700 dark:text-teal-300 rounded-md flex items-center gap-1">
-                          <Check className="h-3 w-3" />
-                          Awaiting fulfillment
-                        </div>
-                      )}
-                      {request.status === 'fulfilled' && (
-                        <div className="px-2.5 py-1 text-[11px] font-semibold bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 rounded-md flex items-center gap-1">
-                          <Send className="h-3 w-3" />
-                          Completed
-                        </div>
-                      )}
-                      {request.status === 'cancelled' && (
-                        <div className="px-2.5 py-1 text-[11px] font-semibold bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 rounded-md flex items-center gap-1">
-                          <XCircle className="h-3 w-3" />
-                          Cancelled
-                        </div>
-                      )}
-                    </div>
+                    {/* Actions — full width row below content on phone, right-aligned on sm+ */}
+                    {(request.status === 'pending' || request.status === 'approved' || request.status === 'fulfilled' || request.status === 'cancelled') && (
+                      <div className="flex items-center gap-2 flex-wrap justify-end pt-2 sm:pt-0 border-t sm:border-t-0 border-zinc-100 dark:border-zinc-800">
+                        {request.status === 'pending' && (
+                          <button
+                            onClick={() => cancelRequest(request.id)}
+                            className="px-3 py-1.5 min-h-[36px] text-[11px] font-semibold bg-white hover:bg-rose-50 dark:bg-zinc-800 dark:hover:bg-rose-950/30 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900 rounded-md transition-colors flex items-center gap-1"
+                          >
+                            <XCircle className="h-3 w-3" />
+                            Cancel
+                          </button>
+                        )}
+                        {request.status === 'approved' && (
+                          <div className="px-2.5 py-1 text-[11px] font-semibold bg-teal-50 dark:bg-teal-950/30 text-teal-700 dark:text-teal-300 rounded-md flex items-center gap-1">
+                            <Check className="h-3 w-3" />
+                            Awaiting fulfillment
+                          </div>
+                        )}
+                        {request.status === 'fulfilled' && (
+                          <div className="px-2.5 py-1 text-[11px] font-semibold bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 rounded-md flex items-center gap-1">
+                            <Send className="h-3 w-3" />
+                            Completed
+                          </div>
+                        )}
+                        {request.status === 'cancelled' && (
+                          <div className="px-2.5 py-1 text-[11px] font-semibold bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 rounded-md flex items-center gap-1">
+                            <XCircle className="h-3 w-3" />
+                            Cancelled
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

@@ -1,4 +1,3 @@
-// app/page.tsx (without Cloudflare Turnstile - with Rate Limiting)
 "use client";
 
 import {

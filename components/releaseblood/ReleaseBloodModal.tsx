@@ -31,7 +31,7 @@ interface InventoryItem {
   minThreshold: number;
   maxThreshold: number;
   expiryDate: string;
-  status: "available" | "low" | "critical" | "expired";
+  status: "available" | "not available";
   location: string;
 }
 
@@ -111,14 +111,15 @@ export default function ReleaseBloodModal({
     }
   }, [initialReleaseData]);
 
+  // Only bags with status 'available' and quantity > 0 can be released
   const availableBloodTypes = inventoryItems
-    .filter(item => item.status !== 'expired' && item.quantity > 0)
+    .filter(item => item.status === 'available' && item.quantity > 0)
     .map(item => item.bloodType)
     .filter((value, index, self) => self.indexOf(value) === index);
 
   const getAvailableUnits = (bloodType: string) => {
     const item = inventoryItems.find(
-      i => i.bloodType === bloodType && i.status !== 'expired'
+      i => i.bloodType === bloodType && i.status === 'available'
     );
     return item ? item.quantity : 0;
   };

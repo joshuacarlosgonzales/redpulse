@@ -118,18 +118,14 @@ export default function DonorProfilePage() {
       
       // Try to fetch from donor API
       let response = await fetch(`/api/donors/${userId}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: { 'Authorization': `Bearer ${token}` }
       });
 
       // If donor API fails, try user profile API
       if (!response.ok) {
         console.log('⚠️ Donor API failed, trying user profile API...');
         response = await fetch('/api/user/profile', {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
+          headers: { 'Authorization': `Bearer ${token}` }
         });
       }
 
@@ -139,10 +135,8 @@ export default function DonorProfilePage() {
         
         let donorData = data.data || data;
         
-        // ✅ Calculate points properly
         const totalDonations = donorData.totalDonations || 0;
         const pointsFromDonor = donorData.points || 0;
-        // If points is 0 but totalDonations > 0, calculate points from donations
         const calculatedPoints = pointsFromDonor > 0 ? pointsFromDonor : totalDonations * 10;
         
         const profileData: DonorProfile = {
@@ -179,7 +173,6 @@ export default function DonorProfilePage() {
         setProfile(profileData);
         setEditForm(profileData);
       } else {
-        // If all APIs fail, use localStorage data
         console.log('⚠️ All APIs failed, using localStorage data');
         const totalDonations = userData.totalDonations || 0;
         const calculatedPoints = userData.points || totalDonations * 10;
@@ -229,7 +222,6 @@ export default function DonorProfilePage() {
     setTimeout(() => setNotification(null), 5000);
   };
 
-  // ✅ Helper function to calculate next eligible date
   const getNextEligibleDate = (lastDonationDate?: string) => {
     if (!lastDonationDate) return null;
     const last = new Date(lastDonationDate);
@@ -239,7 +231,6 @@ export default function DonorProfilePage() {
     return next;
   };
 
-  // ✅ Helper function to calculate days until eligible
   const getDaysUntilEligible = (lastDonationDate?: string) => {
     const nextDate = getNextEligibleDate(lastDonationDate);
     if (!nextDate) return null;
@@ -248,12 +239,9 @@ export default function DonorProfilePage() {
     return diff > 0 ? diff : 0;
   };
 
-  // ✅ Helper function to calculate total points
   const calculateTotalPoints = () => {
     if (!profile) return 0;
-    // If points are stored directly and > 0, use them
     if (profile.points && profile.points > 0) return profile.points;
-    // Otherwise calculate from donations (10 points per donation)
     if (profile.totalDonations) return profile.totalDonations * 10;
     return 0;
   };
@@ -385,12 +373,12 @@ export default function DonorProfilePage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-red-50 to-red-100 dark:from-black dark:to-red-950/30">
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-red-50 to-red-100 dark:from-black dark:to-red-950/30 px-4">
         <div className="text-center">
           <div className="flex justify-center mb-4">
             <div className="h-12 w-12 border-4 border-red-600 border-t-transparent rounded-full animate-spin" />
           </div>
-          <p className="text-zinc-600 dark:text-zinc-400">Loading profile...</p>
+          <p className="text-sm sm:text-base text-zinc-600 dark:text-zinc-400">Loading profile...</p>
         </div>
       </div>
     );
@@ -398,13 +386,13 @@ export default function DonorProfilePage() {
 
   if (!profile) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-red-50 to-red-100 dark:from-black dark:to-red-950/30">
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-red-50 to-red-100 dark:from-black dark:to-red-950/30 px-4">
         <div className="text-center">
-          <User className="h-16 w-16 text-red-400 mx-auto mb-4" />
-          <h2 className="text-xl font-semibold text-zinc-700 dark:text-zinc-300">Profile Not Found</h2>
-          <p className="text-zinc-500 dark:text-zinc-400 mt-2">Please contact support for assistance.</p>
+          <User className="h-14 w-14 sm:h-16 sm:w-16 text-red-400 mx-auto mb-4" />
+          <h2 className="text-lg sm:text-xl font-semibold text-zinc-700 dark:text-zinc-300">Profile Not Found</h2>
+          <p className="text-sm sm:text-base text-zinc-500 dark:text-zinc-400 mt-2">Please contact support for assistance.</p>
           <Link href="/donors/dashboard">
-            <button className="mt-4 px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition">
+            <button className="mt-4 px-6 py-2.5 min-h-[44px] bg-red-600 hover:bg-red-700 text-white rounded-lg transition text-sm font-medium">
               Return to Dashboard
             </button>
           </Link>
@@ -418,37 +406,39 @@ export default function DonorProfilePage() {
   const nextEligibleDate = getNextEligibleDate(profile.lastDonationDate);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-red-50 to-red-100 dark:from-black dark:to-red-950/30 py-8 px-4">
+    <div className="min-h-screen bg-gradient-to-br from-red-50 to-red-100 dark:from-black dark:to-red-950/30 py-4 px-3 sm:py-8 sm:px-4">
       <div className="max-w-4xl mx-auto">
+        {/* Toast notification — full width on phone */}
         {notification && (
-          <div className={`fixed top-20 right-4 z-50 p-4 rounded-lg shadow-lg border ${
+          <div className={`fixed top-16 sm:top-20 left-3 right-3 sm:left-auto sm:right-4 z-50 p-3 sm:p-4 rounded-lg shadow-lg border ${
             notification.type === 'success' 
               ? 'bg-green-50 dark:bg-green-950/90 border-green-200 dark:border-green-800 text-green-700 dark:text-green-300'
               : 'bg-red-50 dark:bg-red-950/90 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300'
           }`}>
             <div className="flex items-center gap-3">
               {notification.type === 'success' ? (
-                <CheckCircle className="h-5 w-5" />
+                <CheckCircle className="h-5 w-5 flex-shrink-0" />
               ) : (
-                <AlertCircle className="h-5 w-5" />
+                <AlertCircle className="h-5 w-5 flex-shrink-0" />
               )}
               <p className="text-sm font-medium">{notification.message}</p>
             </div>
           </div>
         )}
 
-        <div className="flex items-center justify-between mb-6">
+        {/* Top action bar — stacks on phone */}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-4 sm:mb-6">
           <Link href="/donors/dashboard">
-            <button className="flex items-center gap-2 px-4 py-2 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition rounded-lg hover:bg-white/50 dark:hover:bg-black/50">
+            <button className="flex items-center justify-center sm:justify-start gap-2 px-3 py-2.5 min-h-[44px] text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition rounded-lg hover:bg-white/50 dark:hover:bg-black/50 w-full sm:w-auto">
               <ArrowLeft className="h-4 w-4" />
               Back to Dashboard
             </button>
           </Link>
-          <div className="flex gap-2">
+          <div className="flex gap-2 w-full sm:w-auto">
             {!isEditing ? (
               <button
                 onClick={() => setIsEditing(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition"
+                className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2.5 min-h-[44px] bg-red-600 hover:bg-red-700 text-white rounded-lg transition text-sm font-medium"
               >
                 <Edit className="h-4 w-4" />
                 Edit Profile
@@ -460,14 +450,14 @@ export default function DonorProfilePage() {
                     setIsEditing(false);
                     if (profile) setEditForm(profile);
                   }}
-                  className="px-4 py-2 bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-lg hover:bg-zinc-300 dark:hover:bg-zinc-600 transition"
+                  className="flex-1 sm:flex-initial px-4 py-2.5 min-h-[44px] bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-lg hover:bg-zinc-300 dark:hover:bg-zinc-600 transition text-sm font-medium"
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleSave}
                   disabled={saving}
-                  className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition disabled:opacity-50"
+                  className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2.5 min-h-[44px] bg-green-600 hover:bg-green-700 text-white rounded-lg transition disabled:opacity-50 text-sm font-medium"
                 >
                   {saving ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -482,30 +472,31 @@ export default function DonorProfilePage() {
         </div>
 
         <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
-          <div className="bg-gradient-to-r from-red-600 to-red-700 p-6 text-white">
-            <div className="flex items-center gap-4">
-              <div className="h-20 w-20 rounded-full bg-white/20 flex items-center justify-center text-3xl font-bold border-4 border-white/30">
+          {/* Profile header banner */}
+          <div className="bg-gradient-to-r from-red-600 to-red-700 p-4 sm:p-6 text-white">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
+              <div className="h-16 w-16 sm:h-20 sm:w-20 rounded-full bg-white/20 flex items-center justify-center text-2xl sm:text-3xl font-bold border-4 border-white/30 flex-shrink-0">
                 {profile.fullName.charAt(0)}
               </div>
-              <div className="flex-1">
-                <h1 className="text-2xl font-bold">{profile.fullName}</h1>
-                <p className="text-red-100">{profile.email}</p>
-                <div className="flex flex-wrap items-center gap-2 mt-1">
-                  <span className="px-2 py-0.5 bg-white/20 rounded-full text-xs font-medium">
+              <div className="flex-1 min-w-0">
+                <h1 className="text-lg sm:text-2xl font-bold truncate">{profile.fullName}</h1>
+                <p className="text-xs sm:text-base text-red-100 truncate">{profile.email}</p>
+                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mt-1.5">
+                  <span className="px-2 py-0.5 bg-white/20 rounded-full text-[10px] sm:text-xs font-medium">
                     {profile.bloodType}
                   </span>
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-medium ${
                     profile.status === 'active' 
                       ? 'bg-green-500/30' 
                       : 'bg-yellow-500/30'
                   }`}>
                     {profile.status === 'active' ? 'Active' : 'Pending'}
                   </span>
-                  <span className="px-2 py-0.5 bg-white/20 rounded-full text-xs font-medium">
+                  <span className="px-2 py-0.5 bg-white/20 rounded-full text-[10px] sm:text-xs font-medium truncate">
                     ID: {profile.digitalId}
                   </span>
                   {profile.isEligible !== undefined && (
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] sm:text-xs font-medium ${
                       profile.isEligible 
                         ? 'bg-green-500/30' 
                         : 'bg-red-500/30'
@@ -515,8 +506,8 @@ export default function DonorProfilePage() {
                   )}
                 </div>
               </div>
-              <Link href="/donors/digital-id">
-                <button className="flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 text-white rounded-lg transition backdrop-blur-sm border border-white/30">
+              <Link href="/donors/digital-id" className="w-full sm:w-auto">
+                <button className="flex items-center justify-center gap-2 px-4 py-2.5 min-h-[44px] bg-white/20 hover:bg-white/30 text-white rounded-lg transition backdrop-blur-sm border border-white/30 text-sm font-medium w-full sm:w-auto">
                   <IdCard className="h-4 w-4" />
                   View ID
                 </button>
@@ -524,10 +515,10 @@ export default function DonorProfilePage() {
             </div>
           </div>
 
-          <form className="p-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <form className="p-4 sm:p-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                <label className="block text-xs sm:text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
                   Full Name
                 </label>
                 <div className="relative">
@@ -537,13 +528,13 @@ export default function DonorProfilePage() {
                     value={isEditing ? editForm.fullName || '' : profile.fullName}
                     onChange={(e) => setEditForm({ ...editForm, fullName: e.target.value })}
                     disabled={!isEditing}
-                    className="w-full pl-10 pr-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-60"
+                    className="w-full pl-10 pr-4 py-2.5 min-h-[44px] bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-60"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                <label className="block text-xs sm:text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
                   Email Address
                 </label>
                 <div className="relative">
@@ -553,13 +544,13 @@ export default function DonorProfilePage() {
                     value={isEditing ? editForm.email || '' : profile.email}
                     onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
                     disabled={!isEditing}
-                    className="w-full pl-10 pr-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-60"
+                    className="w-full pl-10 pr-4 py-2.5 min-h-[44px] bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-60"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                <label className="block text-xs sm:text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
                   Phone Number
                 </label>
                 <div className="relative">
@@ -569,13 +560,13 @@ export default function DonorProfilePage() {
                     value={isEditing ? editForm.phone || '' : profile.phone}
                     onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
                     disabled={!isEditing}
-                    className="w-full pl-10 pr-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-60"
+                    className="w-full pl-10 pr-4 py-2.5 min-h-[44px] bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-60"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                <label className="block text-xs sm:text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
                   Blood Type
                 </label>
                 <div className="relative">
@@ -584,7 +575,7 @@ export default function DonorProfilePage() {
                     value={isEditing ? editForm.bloodType || '' : profile.bloodType}
                     onChange={(e) => setEditForm({ ...editForm, bloodType: e.target.value })}
                     disabled={!isEditing}
-                    className="w-full pl-10 pr-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-60 appearance-none"
+                    className="w-full pl-10 pr-4 py-2.5 min-h-[44px] bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-60 appearance-none"
                   >
                     <option value="A+">A+</option>
                     <option value="A-">A-</option>
@@ -599,7 +590,7 @@ export default function DonorProfilePage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                <label className="block text-xs sm:text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
                   Date of Birth
                 </label>
                 <div className="relative">
@@ -609,13 +600,13 @@ export default function DonorProfilePage() {
                     value={isEditing ? editForm.dateOfBirth || '' : profile.dateOfBirth}
                     onChange={(e) => setEditForm({ ...editForm, dateOfBirth: e.target.value })}
                     disabled={!isEditing}
-                    className="w-full pl-10 pr-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-60"
+                    className="w-full pl-10 pr-4 py-2.5 min-h-[44px] bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-60"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                <label className="block text-xs sm:text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
                   Gender
                 </label>
                 <div className="relative">
@@ -624,7 +615,7 @@ export default function DonorProfilePage() {
                     value={isEditing ? editForm.gender || '' : profile.gender}
                     onChange={(e) => setEditForm({ ...editForm, gender: e.target.value })}
                     disabled={!isEditing}
-                    className="w-full pl-10 pr-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-60 appearance-none"
+                    className="w-full pl-10 pr-4 py-2.5 min-h-[44px] bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-60 appearance-none"
                   >
                     <option value="">Select Gender</option>
                     <option value="Male">Male</option>
@@ -635,7 +626,7 @@ export default function DonorProfilePage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                <label className="block text-xs sm:text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
                   Weight (kg)
                 </label>
                 <div className="relative">
@@ -648,13 +639,13 @@ export default function DonorProfilePage() {
                     min="40"
                     max="300"
                     step="0.1"
-                    className="w-full pl-10 pr-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-60"
+                    className="w-full pl-10 pr-4 py-2.5 min-h-[44px] bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-60"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                <label className="block text-xs sm:text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
                   Emergency Contact
                 </label>
                 <div className="relative">
@@ -664,13 +655,13 @@ export default function DonorProfilePage() {
                     value={isEditing ? editForm.emergencyContact || '' : profile.emergencyContact}
                     onChange={(e) => setEditForm({ ...editForm, emergencyContact: e.target.value })}
                     disabled={!isEditing}
-                    className="w-full pl-10 pr-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-60"
+                    className="w-full pl-10 pr-4 py-2.5 min-h-[44px] bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-60"
                   />
                 </div>
               </div>
 
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                <label className="block text-xs sm:text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
                   Address
                 </label>
                 <div className="relative">
@@ -680,13 +671,13 @@ export default function DonorProfilePage() {
                     value={isEditing ? editForm.address || '' : profile.address}
                     onChange={(e) => setEditForm({ ...editForm, address: e.target.value })}
                     disabled={!isEditing}
-                    className="w-full pl-10 pr-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-60"
+                    className="w-full pl-10 pr-4 py-2.5 min-h-[44px] bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-60"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                <label className="block text-xs sm:text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
                   Barangay
                 </label>
                 <div className="relative">
@@ -696,13 +687,13 @@ export default function DonorProfilePage() {
                     value={isEditing ? editForm.barangay || '' : profile.barangay}
                     onChange={(e) => setEditForm({ ...editForm, barangay: e.target.value })}
                     disabled={!isEditing}
-                    className="w-full pl-10 pr-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-60"
+                    className="w-full pl-10 pr-4 py-2.5 min-h-[44px] bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-60"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                <label className="block text-xs sm:text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
                   Municipality
                 </label>
                 <div className="relative">
@@ -712,13 +703,13 @@ export default function DonorProfilePage() {
                     value={isEditing ? editForm.municipality || '' : profile.municipality}
                     onChange={(e) => setEditForm({ ...editForm, municipality: e.target.value })}
                     disabled={!isEditing}
-                    className="w-full pl-10 pr-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-60"
+                    className="w-full pl-10 pr-4 py-2.5 min-h-[44px] bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-60"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                <label className="block text-xs sm:text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
                   Province
                 </label>
                 <div className="relative">
@@ -728,13 +719,13 @@ export default function DonorProfilePage() {
                     value={isEditing ? editForm.province || '' : profile.province}
                     onChange={(e) => setEditForm({ ...editForm, province: e.target.value })}
                     disabled={!isEditing}
-                    className="w-full pl-10 pr-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-60"
+                    className="w-full pl-10 pr-4 py-2.5 min-h-[44px] bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-60"
                   />
                 </div>
               </div>
 
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                <label className="block text-xs sm:text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
                   Medical Conditions
                 </label>
                 <div className="relative">
@@ -744,14 +735,14 @@ export default function DonorProfilePage() {
                     onChange={(e) => setEditForm({ ...editForm, medicalConditions: e.target.value })}
                     disabled={!isEditing}
                     rows={3}
-                    className="w-full pl-10 pr-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-60 resize-none"
+                    className="w-full pl-10 pr-4 py-2.5 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-60 resize-none"
                     placeholder="List any medical conditions (if none, leave empty)"
                   />
                 </div>
               </div>
 
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                <label className="block text-xs sm:text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
                   Current Medications
                 </label>
                 <div className="relative">
@@ -761,21 +752,21 @@ export default function DonorProfilePage() {
                     onChange={(e) => setEditForm({ ...editForm, currentMedications: e.target.value })}
                     disabled={!isEditing}
                     rows={3}
-                    className="w-full pl-10 pr-4 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-60 resize-none"
+                    className="w-full pl-10 pr-4 py-2.5 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-60 resize-none"
                     placeholder="List any current medications (if none, leave empty)"
                   />
                 </div>
               </div>
             </div>
 
-            {/* ✅ Fixed Statistics Section */}
-            <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="p-4 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg border border-zinc-200 dark:border-zinc-700">
-                <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Verification Status</p>
-                <p className="text-sm text-zinc-500 dark:text-zinc-400">
+            {/* Statistics Section */}
+            <div className="mt-4 sm:mt-6 grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
+              <div className="p-3 sm:p-4 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg border border-zinc-200 dark:border-zinc-700">
+                <p className="text-xs sm:text-sm font-medium text-zinc-700 dark:text-zinc-300">Verification Status</p>
+                <p className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400">
                   {profile.isVerified ? '✅ Account is verified' : '⏳ Pending verification'}
                 </p>
-                <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-2">
+                <p className="text-[11px] sm:text-xs text-zinc-400 dark:text-zinc-500 mt-2">
                   Member since {new Date(profile.createdAt).toLocaleDateString('en-US', {
                     month: 'long',
                     year: 'numeric'
@@ -783,37 +774,37 @@ export default function DonorProfilePage() {
                 </p>
               </div>
               
-              <div className="p-4 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg border border-zinc-200 dark:border-zinc-700">
-                <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300 flex items-center gap-2">
+              <div className="p-3 sm:p-4 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg border border-zinc-200 dark:border-zinc-700">
+                <p className="text-xs sm:text-sm font-medium text-zinc-700 dark:text-zinc-300 flex items-center gap-2">
                   <Award className="h-4 w-4 text-yellow-500" />
                   Donor Statistics
                 </p>
                 <div className="flex justify-between items-center mt-1">
-                  <span className="text-sm text-zinc-500 dark:text-zinc-400">Total Donations</span>
-                  <span className="text-sm font-semibold text-zinc-900 dark:text-white">
+                  <span className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400">Total Donations</span>
+                  <span className="text-xs sm:text-sm font-semibold text-zinc-900 dark:text-white">
                     {profile.totalDonations || 0}
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-sm text-zinc-500 dark:text-zinc-400">Points Earned</span>
-                  <span className="text-sm font-semibold text-yellow-600 dark:text-yellow-400">
+                  <span className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400">Points Earned</span>
+                  <span className="text-xs sm:text-sm font-semibold text-yellow-600 dark:text-yellow-400">
                     {totalPoints}
                   </span>
                 </div>
                 {profile.lastDonationDate && (
                   <div className="flex justify-between items-center">
-                    <span className="text-sm text-zinc-500 dark:text-zinc-400">Last Donation</span>
-                    <span className="text-sm font-medium text-zinc-900 dark:text-white">
+                    <span className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400">Last Donation</span>
+                    <span className="text-xs sm:text-sm font-medium text-zinc-900 dark:text-white">
                       {new Date(profile.lastDonationDate).toLocaleDateString()}
                     </span>
                   </div>
                 )}
                 <div className="flex justify-between items-center mt-1 pt-1 border-t border-zinc-200 dark:border-zinc-700">
-                  <span className="text-sm text-zinc-500 dark:text-zinc-400 flex items-center gap-1">
+                  <span className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400 flex items-center gap-1">
                     <Clock className="h-3 w-3" />
                     Next Eligible
                   </span>
-                  <span className={`text-sm font-medium ${
+                  <span className={`text-xs sm:text-sm font-medium ${
                     daysUntilEligible === 0 
                       ? 'text-green-600 dark:text-green-400' 
                       : 'text-zinc-600 dark:text-zinc-400'
@@ -830,20 +821,20 @@ export default function DonorProfilePage() {
               </div>
             </div>
 
-            {/* ✅ Blood Type Info Card */}
-            <div className="mt-4 p-4 bg-gradient-to-r from-red-50 to-red-100 dark:from-red-950/20 dark:to-red-900/20 rounded-lg border border-red-200 dark:border-red-800">
-              <div className="flex items-center gap-3">
-                <div className="h-12 w-12 rounded-full bg-red-600/20 flex items-center justify-center">
-                  <Droplet className="h-6 w-6 text-red-600" />
+            {/* Blood Type Info Card */}
+            <div className="mt-3 sm:mt-4 p-3 sm:p-4 bg-gradient-to-r from-red-50 to-red-100 dark:from-red-950/20 dark:to-red-900/20 rounded-lg border border-red-200 dark:border-red-800">
+              <div className="flex items-start sm:items-center gap-3">
+                <div className="h-10 w-10 sm:h-12 sm:w-12 rounded-full bg-red-600/20 flex items-center justify-center flex-shrink-0">
+                  <Droplet className="h-5 w-5 sm:h-6 sm:w-6 text-red-600" />
                 </div>
-                <div>
-                  <p className="text-sm font-semibold text-zinc-900 dark:text-white">
+                <div className="min-w-0">
+                  <p className="text-xs sm:text-sm font-semibold text-zinc-900 dark:text-white">
                     Blood Type: {profile.bloodType}
                   </p>
-                  <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                  <p className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-400">
                     Rh Factor: {profile.bloodType.includes('+') ? 'Positive (+) ✅' : 'Negative (-) ⚠️'}
                   </p>
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                  <p className="text-[11px] sm:text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
                     {profile.bloodType.includes('+') 
                       ? 'Can receive: + and - types of same blood group' 
                       : 'Can only receive: - types of same blood group'}

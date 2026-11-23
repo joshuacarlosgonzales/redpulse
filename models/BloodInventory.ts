@@ -2,17 +2,17 @@
 import mongoose, { Schema, Document, Model } from 'mongoose'
 
 export interface IBloodInventory extends Document {
-  hospitalId: mongoose.Types.ObjectId;
-  bloodType: string;
-  units: number;
-  minRequired: number;
-  maxCapacity: number;
-  expirationDate: Date;
-  status: 'sufficient' | 'low' | 'critical' | 'out of stock';
-  notes?: string;
-  batchNumber?: string;
-  createdAt: Date;
-  updatedAt: Date;
+  hospitalId: mongoose.Types.ObjectId
+  bloodType: string
+  units: number
+  minRequired: number
+  maxCapacity: number
+  expirationDate: Date
+  status: 'sufficient' | 'low' | 'critical' | 'out of stock'
+  notes?: string
+  batchNumber?: string
+  createdAt: Date
+  updatedAt: Date
 }
 
 const BloodInventorySchema = new Schema<IBloodInventory>(
@@ -21,51 +21,42 @@ const BloodInventorySchema = new Schema<IBloodInventory>(
       type: Schema.Types.ObjectId,
       ref: 'User',
       required: [true, 'Hospital ID is required'],
-      index: true
+      index: true,
     },
     bloodType: {
       type: String,
       required: [true, 'Blood type is required'],
-      enum: ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-']
+      enum: ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'],
     },
     units: {
       type: Number,
       required: [true, 'Units are required'],
       default: 0,
-      min: 0
+      min: 0,
     },
-    minRequired: {
-      type: Number,
-      default: 15
-    },
-    maxCapacity: {
-      type: Number,
-      default: 60
-    },
+    minRequired: { type: Number, default: 15 },
+    maxCapacity: { type: Number, default: 60 },
     expirationDate: {
       type: Date,
-      required: [true, 'Expiration date is required']
+      required: [true, 'Expiration date is required'],
     },
     status: {
       type: String,
       enum: ['sufficient', 'low', 'critical', 'out of stock'],
-      default: 'sufficient'
+      default: 'sufficient',
     },
-    notes: {
-      type: String,
-      default: ''
-    },
-    batchNumber: {
-      type: String,
-      default: ''
-    }
+    notes: { type: String, default: '' },
+    batchNumber: { type: String, default: '' },
   },
-  {
-    timestamps: true
-  }
+  { timestamps: true }
 )
 
-BloodInventorySchema.pre('save', async function () {
+// Pre-save: recompute status from units ONLY.
+// Expiry is surfaced by the API transform (computeFrontendStatus),
+// never baked into the persisted status. This is what previously
+// caused "expired but a unit left" — units=5 flipped to 'out of stock'
+// on expiry and the frontend filtered the row out entirely.
+BloodInventorySchema.pre('save', function () {
   const doc = this as unknown as IBloodInventory
 
   if (doc.units === 0) {
@@ -77,14 +68,14 @@ BloodInventorySchema.pre('save', async function () {
   } else {
     doc.status = 'sufficient'
   }
-
-  if (doc.expirationDate && new Date(doc.expirationDate) < new Date()) {
-    doc.status = 'out of stock'
-  }
 })
 
-BloodInventorySchema.index({ hospitalId: 1, bloodType: 1 }, { unique: true })
 
-const BloodInventory: Model<IBloodInventory> = mongoose.models.BloodInventory || mongoose.model<IBloodInventory>('BloodInventory', BloodInventorySchema)
+BloodInventorySchema.index({ hospitalId: 1, bloodType: 1 }, { unique: true })
+BloodInventorySchema.index({ hospitalId: 1, expirationDate: 1 })
+
+const BloodInventory: Model<IBloodInventory> =
+  mongoose.models.BloodInventory ||
+  mongoose.model<IBloodInventory>('BloodInventory', BloodInventorySchema)
 
 export default BloodInventory

@@ -70,9 +70,7 @@ export default function DonationHistory() {
       }
 
       const response = await fetch('/api/user/donations?limit=500', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: { 'Authorization': `Bearer ${token}` }
       });
 
       if (!response.ok) {
@@ -115,8 +113,6 @@ export default function DonationHistory() {
     setExpandedHospitals((prev) => ({ ...prev, [hospitalName]: !prev[hospitalName] }));
   };
 
-  // Group donations by hospital — donations is already sorted newest-first,
-  // so each group's donation list stays newest-first too.
   const hospitalGroups: HospitalGroup[] = useMemo(() => {
     const map = new Map<string, Donation[]>();
     donations.forEach((d) => {
@@ -150,7 +146,7 @@ export default function DonationHistory() {
   const hasMore = visibleCount < hospitalGroups.length;
 
   const DonationRow = ({ donation }: { donation: Donation }) => (
-    <div className="flex items-center justify-between p-2.5 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800/40 transition-colors">
+    <div className="flex items-start justify-between gap-2 p-2.5 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800/40 transition-colors">
       <div className="flex items-center gap-2.5 min-w-0 flex-1">
         <div className="h-7 w-7 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-100 dark:border-red-900 flex items-center justify-center flex-shrink-0">
           <Droplet className="h-3 w-3 text-red-600" />
@@ -168,8 +164,8 @@ export default function DonationHistory() {
           )}
         </div>
       </div>
-      <div className="text-right flex-shrink-0 ml-2">
-        <span className={`px-2 py-0.5 text-[10px] font-semibold rounded-md border ${statusColors[donation.status] || statusColors.pending}`}>
+      <div className="text-right flex-shrink-0">
+        <span className={`inline-block px-2 py-0.5 text-[10px] font-semibold rounded-md border ${statusColors[donation.status] || statusColors.pending}`}>
           {donation.status.charAt(0).toUpperCase() + donation.status.slice(1)}
         </span>
         <p className="text-[10px] sm:text-xs text-zinc-400 dark:text-zinc-500 mt-1 font-medium">+{donation.points} pts</p>
@@ -183,7 +179,7 @@ export default function DonationHistory() {
       <div className="rounded-xl border border-zinc-100 dark:border-zinc-800 overflow-hidden">
         <button
           onClick={() => toggleHospital(group.hospitalName)}
-          className="w-full flex items-center justify-between gap-3 p-3 hover:bg-zinc-50 dark:hover:bg-zinc-800/40 transition-colors text-left"
+          className="w-full flex items-center justify-between gap-2 p-3 hover:bg-zinc-50 dark:hover:bg-zinc-800/40 transition-colors text-left"
         >
           <div className="flex items-center gap-2.5 min-w-0 flex-1">
             <div className="h-8 w-8 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center flex-shrink-0">
@@ -193,7 +189,7 @@ export default function DonationHistory() {
               <p className="text-xs sm:text-sm font-semibold text-zinc-900 dark:text-white truncate">
                 {group.hospitalName}
               </p>
-              <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5">
+              <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5 truncate">
                 {group.donations.length} donation{group.donations.length > 1 ? 's' : ''} · +{group.totalPoints} pts · last {new Date(group.lastDate).toLocaleDateString()}
               </p>
             </div>
@@ -218,18 +214,18 @@ export default function DonationHistory() {
 
   return (
     <>
-      <div className="bg-white dark:bg-zinc-900 rounded-2xl p-4 sm:p-5 border border-zinc-200 dark:border-zinc-800">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm sm:text-base font-bold text-zinc-900 dark:text-white flex items-center gap-2">
-            <div className="h-7 w-7 rounded-lg bg-red-50 dark:bg-red-950/30 flex items-center justify-center">
+      <div className="bg-white dark:bg-zinc-900 rounded-2xl p-3 sm:p-5 border border-zinc-200 dark:border-zinc-800">
+        <div className="flex items-center justify-between mb-3 sm:mb-4 gap-2">
+          <h2 className="text-sm sm:text-base font-bold text-zinc-900 dark:text-white flex items-center gap-2 min-w-0">
+            <div className="h-7 w-7 rounded-lg bg-red-50 dark:bg-red-950/30 flex items-center justify-center flex-shrink-0">
               <History className="h-3.5 w-3.5 text-red-600 dark:text-red-400" />
             </div>
-            Donation History
+            <span className="truncate">Donation History</span>
           </h2>
           {donations.length > 0 && (
             <button
               onClick={() => setIsModalOpen(true)}
-              className="text-xs font-semibold text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors"
+              className="text-xs font-semibold text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors flex-shrink-0 min-h-[32px] px-2 -mx-2"
             >
               View all
             </button>
@@ -239,7 +235,7 @@ export default function DonationHistory() {
         {error && (
           <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-rose-100 dark:border-rose-900/50 bg-rose-50 dark:bg-rose-950/20 p-3 text-rose-700 dark:text-rose-400">
             <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
-            <div className="flex-1">
+            <div className="flex-1 min-w-0">
               <p className="text-xs font-medium">{error}</p>
               <button
                 onClick={fetchHistory}
@@ -252,22 +248,22 @@ export default function DonationHistory() {
         )}
 
         {/* Stats strip */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-y sm:divide-y-0 divide-zinc-100 dark:divide-zinc-800 border border-zinc-100 dark:border-zinc-800 rounded-xl mb-4 overflow-hidden">
-          <div className="p-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-y sm:divide-y-0 divide-zinc-100 dark:divide-zinc-800 border border-zinc-100 dark:border-zinc-800 rounded-xl mb-3 sm:mb-4 overflow-hidden">
+          <div className="p-2.5 sm:p-3">
             <p className="text-[10px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wide">Donations</p>
-            <p className="text-base sm:text-lg font-bold text-zinc-900 dark:text-white mt-0.5">{stats.totalDonations}</p>
+            <p className="text-sm sm:text-lg font-bold text-zinc-900 dark:text-white mt-0.5">{stats.totalDonations}</p>
           </div>
-          <div className="p-3">
+          <div className="p-2.5 sm:p-3">
             <p className="text-[10px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wide">Points</p>
-            <p className="text-base sm:text-lg font-bold text-red-600 dark:text-red-400 mt-0.5">{stats.totalPoints}</p>
+            <p className="text-sm sm:text-lg font-bold text-red-600 dark:text-red-400 mt-0.5">{stats.totalPoints}</p>
           </div>
-          <div className="p-3">
+          <div className="p-2.5 sm:p-3">
             <p className="text-[10px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wide">Hospitals</p>
-            <p className="text-base sm:text-lg font-bold text-sky-600 dark:text-sky-400 mt-0.5">{stats.hospitalsCount}</p>
+            <p className="text-sm sm:text-lg font-bold text-sky-600 dark:text-sky-400 mt-0.5">{stats.hospitalsCount}</p>
           </div>
-          <div className="p-3">
+          <div className="p-2.5 sm:p-3 col-span-2 sm:col-span-1">
             <p className="text-[10px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wide">Last visit</p>
-            <p className="text-xs sm:text-sm font-semibold text-zinc-700 dark:text-zinc-300 mt-1">
+            <p className="text-xs sm:text-sm font-semibold text-zinc-700 dark:text-zinc-300 mt-1 truncate">
               {stats.lastDonationDate ? new Date(stats.lastDonationDate).toLocaleDateString() : 'N/A'}
             </p>
           </div>
@@ -290,11 +286,11 @@ export default function DonationHistory() {
             </div>
 
             {hasMore && (
-              <div className="mt-4 flex justify-center">
+              <div className="mt-3 sm:mt-4 flex justify-center">
                 <button
                   onClick={handleLoadMore}
                   disabled={loadingMore}
-                  className="px-4 py-2 text-xs font-semibold text-red-600 dark:text-red-400 border border-red-200 dark:border-red-900 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors disabled:opacity-50 flex items-center gap-2"
+                  className="w-full sm:w-auto px-4 py-2.5 min-h-[44px] text-xs font-semibold text-red-600 dark:text-red-400 border border-red-200 dark:border-red-900 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {loadingMore ? (
                     <Loader2 className="h-3 w-3 animate-spin" />
@@ -308,42 +304,40 @@ export default function DonationHistory() {
         )}
       </div>
 
-      {/* Modal */}
+      {/* Modal — safe-area padded on phones */}
       {isModalOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-zinc-900/40 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-zinc-900/40 backdrop-blur-sm"
           onClick={() => setIsModalOpen(false)}
         >
           <div
-            className="bg-white dark:bg-zinc-900 rounded-2xl max-w-2xl w-full max-h-[90vh] flex flex-col border border-zinc-200 dark:border-zinc-800 shadow-xl shadow-zinc-900/10"
+            className="bg-white dark:bg-zinc-900 rounded-t-2xl sm:rounded-2xl max-w-2xl w-full max-h-[92vh] sm:max-h-[90vh] flex flex-col border-t sm:border border-zinc-200 dark:border-zinc-800 shadow-xl shadow-zinc-900/10"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Modal Header */}
-            <div className="flex items-center justify-between p-4 sm:p-5 border-b border-zinc-100 dark:border-zinc-800">
+            <div className="flex items-center justify-between p-4 sm:p-5 border-b border-zinc-100 dark:border-zinc-800 sticky top-0 bg-white dark:bg-zinc-900 z-10 rounded-t-2xl">
               <h2 className="text-sm sm:text-base font-bold text-zinc-900 dark:text-white">
                 All hospitals
                 <span className="ml-2 text-xs font-semibold text-zinc-400 dark:text-zinc-500">({hospitalGroups.length})</span>
               </h2>
               <button
                 onClick={() => setIsModalOpen(false)}
-                className="p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                className="p-2 -mr-1 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors min-h-[40px] min-w-[40px] flex items-center justify-center"
+                aria-label="Close"
               >
                 <X className="h-4 w-4 text-zinc-500 dark:text-zinc-400" />
               </button>
             </div>
 
-            {/* Modal Body */}
-            <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-2">
+            <div className="flex-1 overflow-y-auto p-3 sm:p-5 space-y-2">
               {hospitalGroups.map((group) => (
                 <HospitalGroupCard key={group.hospitalName} group={group} />
               ))}
             </div>
 
-            {/* Modal Footer */}
             <div className="flex justify-end p-3 sm:p-4 border-t border-zinc-100 dark:border-zinc-800">
               <button
                 onClick={() => setIsModalOpen(false)}
-                className="px-4 py-2 text-xs font-semibold text-zinc-600 dark:text-zinc-300 bg-zinc-100 dark:bg-zinc-800 rounded-lg hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+                className="w-full sm:w-auto px-4 py-2.5 min-h-[44px] text-xs font-semibold text-zinc-600 dark:text-zinc-300 bg-zinc-100 dark:bg-zinc-800 rounded-lg hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
               >
                 Close
               </button>
